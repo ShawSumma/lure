@@ -55,6 +55,11 @@
 (define skip/p
     (many/p
         (first/p
+            (do
+                (string/p "--")
+                (many/p
+                    (satisfy/p
+                        (lambda (x) (not (equal? x #\newline))))))
             (char/p #\space)
             (char/p #\newline))))
 
@@ -294,6 +299,40 @@
         skip/p
         (pure (list 'while test whiletrue))))
 
+(define for-stmt/p
+    (do
+        (string/p "for")
+        skip/p
+        (ivar <- ident/p)
+        skip/p
+        (string/p "=")
+        skip/p
+        (ival <- expr/p)
+        skip/p
+        (string/p ",")
+        (test <- expr/p)
+                skip/p
+        (step <- (first/p
+            (do
+                (string/p ",")
+                skip/p
+                (ret <- expr/p)
+                skip/p
+                (pure ret))))
+        skip/p
+        (string/p "do")
+        skip/p
+        (forbody <- block-body/p)
+        skip/p
+        (string/p "end")
+        skip/p
+        (pure
+            (list 'for ivar ival
+                (if (void? step) 
+                    (list 'number "1")
+                    step)
+                forbody))))
+
 (define single/p
     (first/p lambda-expr/p number/p dstring/p parens/p table/p name/p))
 
@@ -514,7 +553,6 @@
     (do
         (string/p "return")
         skip/p
-        ;;; (expr <- expr/p)
         (expr <-
             (first/p
                 (many/p #:sep (do skip/p (string/p ",") skip/p) expr/p)
@@ -538,6 +576,7 @@
             expr-stmt/p
             if-stmt/p
             while-stmt/p
+            for-stmt/p
             local-stmt/p))
         (pure ret)))
 

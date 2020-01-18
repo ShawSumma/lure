@@ -14,7 +14,7 @@
 
 (define (lang-read-lit src in)
     (strip-context #`(module in racket/base
-        (require "../locals.rkt")
+        (require lua/locals)
 
         (define has-return #f)
         (define return-value 'nil)
@@ -22,6 +22,7 @@
         (void #,(letrec
             ((ast (parse-text (port->string in)))
             (stx (compile ast)))
+            (println stx)
             stx))
         (void))))
 

@@ -103,10 +103,10 @@
 (define builtin-mod (binary-arith "__mod" modulo))
 (define builtin-pow (binary-arith "__pow" expt))
 
-(define (builtin-eq . v)
+(define (boolean-eq . v)
     (apply equal? v))
 
-(define (builtin-neq . v)
+(define (boolean-neq . v)
     (not (apply equal? v)))
         
 (define (lib-setmetatable tab meta)

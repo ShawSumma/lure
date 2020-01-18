@@ -8,4 +8,4 @@ local function fib(n)
     end
 end
 
-print(fib(30))
+print(fib(35))

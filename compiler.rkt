@@ -136,20 +136,24 @@
         #,(compile (caddr expr))
         return-value))
 
-;;; (define (compile-lambda expr)
-;;;     #`(lambda (#,@(map compile (cadr expr)))
-;;;         (let/ec return
-;;;             #,(compile (caddr expr))
-;;;             nil)))
-
 (define (compile-if expr)
     #`(if #,(compile (cadr expr))
         #,(compile (caddr expr))
         #,(compile (cadddr expr))))
 
-;;; (define (compile-while expr)
-;;;     #`(while #,(compile (cadr expr))
-;;;         #,(compile (caddr expr))))
+(define (compile-while expr)
+    #`((lambda ()
+        (define cexpr (lambda () #,(compile (cadr expr))))
+        (define (while)
+            (define isbroke (equal? has-return 'while))
+            (if (and (cexpr) (not has-return))
+                (begin
+                    #,(compile (caddr expr))
+                    (while))
+                (if isbroke
+                    (set! return-value #f)
+                    nil)))
+        (while))))
 
 (define (compile-return-after expr)
     #`(begin #,@(map compile (cdadr expr))
@@ -194,6 +198,7 @@
 
 (define (compile expr)
     (define type (car expr))
+    (println type)
     (define ret (cond
         ((equal? 'string type) (compile-string expr))
         ((equal? 'number type) (compile-number expr))
@@ -202,7 +207,7 @@
         ((equal? 'global type) (compile-global expr))
         ((equal? 'lambda type) (compile-lambda expr))
         ((equal? 'if type) (compile-if expr))
-        ;;; ((equal? 'while type) (compile-while expr))
+        ((equal? 'while type) (compile-while expr))
         ((equal? 'table type) (compile-table expr))
         ((equal? 'index type) (compile-index expr))
         ((equal? 'op-unary type) (compile-op-unary expr))
