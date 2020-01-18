@@ -13,8 +13,7 @@
 
 
 (define (lang-read-lit src in)
-    ;;; (strip-context #`(module in racket/base
-    (strip-bindings #`(module in racket/base
+    (strip-context #`(module in racket/base
         (require "../locals.rkt")
 
         (define has-return #f)
