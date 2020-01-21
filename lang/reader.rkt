@@ -1,6 +1,8 @@
 #lang racket/base
 
 (require racket/port)
+(require racket/format)
+(require racket/pretty)
 
 (require lua/comb/parser)
 (require lua/compiler)
@@ -10,7 +12,6 @@
 (provide
     (rename-out
         (lang-read-lit read-syntax)))
-
 
 (define (lang-read-lit src in)
     (strip-context #`(module in racket/base
@@ -22,7 +23,6 @@
         (void #,(letrec
             ((ast (parse-text (port->string in)))
             (stx (compile ast)))
-            (println stx)
             stx))
         (void))))
 

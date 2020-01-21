@@ -69,7 +69,7 @@
         (cond
             ((string? a) a)
             ((equal? a nil) "nil")
-            ((procedure? a) ("<function>"))
+            ((procedure? a) "<function>")
             ((boolean? a) (if a "true" "false"))
             ((number? a) (number->string a)))))
 
@@ -120,7 +120,7 @@
             tab)))
 
 (define (lib-print . args)
-    (for-each
+    (map
         (lambda (arg)
             (cond
                 ((not (equal? (car arg) 0)) (display "\t"))

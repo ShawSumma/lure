@@ -11,7 +11,7 @@
         "-" 'builtin-sub
         "/" 'builtin-div
         "%" 'builtin-mod
-        "**" 'builtin-pow
+        "^" 'builtin-pow
         "==" 'boolean-eq
         "~=" 'boolean-neq
         "<=" '<=
@@ -71,48 +71,27 @@
         (call self-func self #,@(map compile (cdddr expr)))))
 
 (define (find-locals expr)
-    (map (lambda (locv) (string->symbol (car (cdadr locv))))
+    (map (lambda (locv) (compile (cadr locv)))
         (filter
             (lambda (sub) (equal? 'local (car sub)))
             (cdr expr))))
 
 (define (compile-block expr)
     (define names (set->list (list->set (find-locals expr))))
-    #`(let
-        (#,@(map
+    #`((lambda ()
+        #,@(map
             (lambda (name)
-                #`(#,(string->symbol
-                    (string-append "lua-" (symbol->string name)))
-                    'nil))
-            names))
+                #`(define
+                    #,name
+                    nil))
+            names)
         #,@(map
             (lambda (obj)
                 #`(if has-return return-value #,(compile obj)))
             (cdr expr))
-        nil))
+        nil)))
 
-(define (compile-program expr)
-    (define names (set->list (list->set (find-locals expr))))
-    #`(let
-        (#,@(map
-            (lambda (name)
-                #`(#,(string->symbol
-                    (string-append "lua-" (symbol->string name)))
-                    'nil))
-            names))
-        #,@(map compile (cdr expr))
-        nil))
-
-;;; (define (compile-block expr)
-;;;     (define names (set->list (list->set (find-locals expr))))
-;;;     #`(let
-;;;         (#,@(map
-;;;             (lambda (name)
-;;;                 #`(#,(string->symbol
-;;;                     (string-append "lua-" (symbol->string name)))
-;;;                     'nil))
-;;;             names))
-;;;         #,@(map compile (cdr expr))))
+(define compile-program compile-block)
 
 (define (compile-op-binary expr)
     (if (empty? (cddr expr))
@@ -155,9 +134,13 @@
                     nil)))
         (while))))
 
-(define (compile-return-after expr)
-    #`(begin #,@(map compile (cdadr expr))
-        #,(compile (caddr expr))))
+(define (compile-for expr)
+    #`(for ((#,(compile (cadr expr))
+        (in-range
+            #,(compile (caddr expr))
+            (+ #,(compile (cadddr expr)) 1)
+            #,(compile (cadr (cdddr expr))))))
+        #,(compile (caddr (cdddr expr)))))
 
 (define (compile-return expr)
     #`(begin
@@ -196,9 +179,10 @@
         #,(compile (caddr expr))
         #,(compile (cadddr expr))))
 
+
+
 (define (compile expr)
     (define type (car expr))
-    (println type)
     (define ret (cond
         ((equal? 'string type) (compile-string expr))
         ((equal? 'number type) (compile-number expr))
@@ -208,6 +192,7 @@
         ((equal? 'lambda type) (compile-lambda expr))
         ((equal? 'if type) (compile-if expr))
         ((equal? 'while type) (compile-while expr))
+        ((equal? 'for type) (compile-for expr))
         ((equal? 'table type) (compile-table expr))
         ((equal? 'index type) (compile-index expr))
         ((equal? 'op-unary type) (compile-op-unary expr))
@@ -219,7 +204,6 @@
         ((equal? 'local type) (compile-local expr))
         ((equal? 'program type) (compile-program expr))
         ((equal? 'block type) (compile-block expr))
-        ((equal? 'return-after type) (compile-return-after expr))
         ((equal? 'return type) (compile-return expr))
         (#t (error "internal error: ast"))))
     ret)

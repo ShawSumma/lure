@@ -1,13 +1,18 @@
 #lang lua
 
-local function closure()
-    -- local x = 1
+local function counter()
+    local val = 0
     local function ret()
-        -- print(x)
-        -- x = x + 1
+        val = val + 1
+        return val
     end
-    ret()
     return ret
 end
 
-closure()
+local ctr = counter()
+
+print(ctr())
+print(ctr())
+print(ctr())
+print(ctr())
+

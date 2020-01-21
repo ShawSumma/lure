@@ -303,35 +303,48 @@
     (do
         (string/p "for")
         skip/p
-        (ivar <- ident/p)
+        (ivar <- name/p)
         skip/p
         (string/p "=")
         skip/p
         (ival <- expr/p)
         skip/p
         (string/p ",")
-        (test <- expr/p)
-                skip/p
+        skip/p
+        (max <- expr/p)
+        skip/p
         (step <- (first/p
             (do
                 (string/p ",")
                 skip/p
                 (ret <- expr/p)
                 skip/p
-                (pure ret))))
+                (pure ret))
+            void/p))
         skip/p
         (string/p "do")
         skip/p
+        (define before locals)
+        (pure (set! locals (cons (cadr ivar) locals)))
         (forbody <- block-body/p)
         skip/p
         (string/p "end")
-        skip/p
         (pure
-            (list 'for ivar ival
-                (if (void? step) 
-                    (list 'number "1")
-                    step)
-                forbody))))
+            (let
+                ((iname (list 'name (cadr ivar))))
+                (set! locals before)
+                (list 'block
+                    (list 'local iname ival)
+                    (list 'local (list 'raw-name "for-stop") max)
+                    (list 'local (list 'raw-name "for-step")
+                        (if (void? step)
+                            (list 'number "1")
+                            step))
+                    (list 'while
+                        (list 'op-binary iname (list 'operator "<=") (list 'raw-name "for-stop"))
+                        (list 'block
+                            forbody
+                            (list 'set iname (list 'op-binary iname (list 'operator "+") (list 'raw-name "for-step"))))))))))
 
 (define single/p
     (first/p lambda-expr/p number/p dstring/p parens/p table/p name/p))
@@ -411,7 +424,7 @@
 
 (define pow-expr/p
     (bin-expr/p pre-expr/p 'self
-        (string/p "**")))
+        (string/p "^")))
 
 (define mul-expr/p
     (bin-expr/p pow-expr/p 'self
@@ -592,7 +605,7 @@
             (begin
                 (if (void? retv)
                     (cons 'block stmts)
-                    (list 'return-after (cons 'block stmts) retv))))))
+                    (append (cons 'block stmts) (list retv)))))))
 
 (define all/p
     (do
