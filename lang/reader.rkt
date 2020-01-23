@@ -2,10 +2,11 @@
 
 (require racket/port)
 (require racket/format)
-(require racket/pretty)
+;;; (require racket/pretty)
 
 (require lua/comb/parser)
 (require lua/compiler)
+(require lua/locals)
 
 (require syntax/strip-context)
 
@@ -21,8 +22,8 @@
         (define return-value 'nil)
 
         (void #,(letrec
-            ((ast (parse-text (port->string in)))
-            (stx (compile ast)))
+            ((parsed (parse-text (port->string in)))
+            (stx (compile parsed)))
+            ;;; (pretty-print (syntax->datum stx))
             stx))
         (void))))
-

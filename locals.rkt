@@ -25,9 +25,9 @@
         (bv b))
         (if (to-boolean av) (if (to-boolean bv) bv #f) #f)))
 
+(define make-return list)
 (define (call func . args)
     (apply func args))
-
 (define (ecall func . args)
     (define ret (apply call func args))
     (cond

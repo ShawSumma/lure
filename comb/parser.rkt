@@ -16,14 +16,41 @@
         "return" "not" "or" "repeat" "return"
         "until" "then" "until" "while"))
 
-(define locals (list "true" "false" "nil"))
+(define locals
+    (list
+        (list 2 "true" "true")
+        (list 1 "false" "false")
+        (list 0 "nil" "nil")))
+
+(define next (length locals))
+
+(define (add-local name)
+    (set! locals
+        (cons
+            (list
+                next
+                (string-append "local-" (number->string next))
+                (cadr name))
+        locals))
+    (set! next (+ next 1))
+    (find-name name))
+
+(define scopes (list))
+
+(define (scope)
+    (set! scopes (cons locals scopes))
+    (void))
+
+(define (unscope)
+    (set! locals (car scopes))
+    (set! scopes (cdr scopes)))
 
 (define (name-defined? name)
     (not
         (empty?
             (filter
                 (lambda (local)
-                    (equal? name local))
+                    (equal? name (caddr local)))
                 locals))))
 
 (define (name-okay? name)
@@ -74,14 +101,21 @@
             name-okay?))
         (pure (list->string ident))))
 
+(define (find-name arg)
+    (define str (if (list? arg) (cadr arg) arg))
+    (cadar
+        (filter
+            (lambda (local)
+                (equal? str (caddr local)))
+            locals)))
 
 (define name/p
     (do
         (str <- ident/p)
         (pure
-            (list 
-                (if (name-defined? str) 'name 'global)
-                    str))))
+            (if (name-defined? str)
+                (list 'name (find-name str))
+                (list 'global str)))))
 
 (define number/p
     (do
@@ -158,8 +192,8 @@
             skip/p
             (pure
                 (begin
-                    (set! locals (cons (cadr ret) locals))
-                    (list 'name (cadr ret)))))))
+                    (add-local ret)
+                    (list 'name (find-name (cadr ret))))))))
 
 (define call-args/p
     (do
@@ -235,7 +269,7 @@
 (define lambda-expr/p
     (do
         (string/p "function")
-        (define before locals)
+        (pure (scope))
         skip/p
         (string/p "(")
         skip/p
@@ -248,7 +282,7 @@
         (string/p "end")
         (pure
             (begin
-                (set! locals before)
+                (unscope)
                 (list 'lambda args block)))))
     
 (define if-stmt/p
@@ -259,18 +293,18 @@
         skip/p
         (string/p "then")
         skip/p
-        (define before locals)
+        (pure (scope))
         (iftrue <- block-body/p)
-        (do void/p (pure (set! locals before)))
+        (pure (unscope))
         skip/p
         (elseif <-
             (first/p
                 (do
                     (string/p "else")
                     skip/p
-                    (define before locals)
+                    (pure (scope))
                     (ret <- block-body/p)
-                    (do void/p (pure (set! locals before)))
+                    (pure (unscope))
                     skip/p
                     (string/p "end")
                     skip/p
@@ -282,7 +316,7 @@
         (pure (list 'if test
             iftrue
             (if (void? elseif)
-                (list 'name "nil")
+                (list 'block)
                 elseif)))))
 
 (define while-stmt/p
@@ -298,6 +332,55 @@
         (string/p "end")
         skip/p
         (pure (list 'while test whiletrue))))
+
+;;; (define for-stmt/p
+;;;     (do
+;;;         (string/p "for")
+;;;         skip/p
+;;;         (ivar <- name/p)
+;;;         skip/p
+;;;         (string/p "=")
+;;;         skip/p
+;;;         (ival <- expr/p)
+;;;         skip/p
+;;;         (string/p ",")
+;;;         skip/p
+;;;         (max <- expr/p)
+;;;         skip/p
+;;;         (step <- (first/p
+;;;             (do
+;;;                 (string/p ",")
+;;;                 skip/p
+;;;                 (ret <- expr/p)
+;;;                 skip/p
+;;;                 (pure ret))
+;;;             void/p))
+;;;         skip/p
+;;;         (string/p "do")
+;;;         skip/p
+;;;         (pure (scope))
+;;;         (pure (add-local ivar))
+;;;         (forbody <- block-body/p)
+;;;         skip/p
+;;;         (string/p "end")
+;;;         (pure
+;;;             (let
+;;;                 ((iname (list 'name (find-name (cadr ivar))))
+;;;                 (stop-name (list 'name (add-local "for-stop")))
+;;;                 (step-name (list 'name (add-local "for-step"))))
+;;;                 (unscope)
+;;;                 (list 'block
+;;;                     (list 'local iname ival)
+;;;                     (list 'local step-name
+;;;                         (if (void? step)
+;;;                             (list 'number "1")
+;;;                             step))
+;;;                     (list 'local stop-name max)
+;;;                     (list 'while
+;;;                         (list 'op-binary iname (list 'operator "<=") stop-name)
+;;;                         (list 'block
+;;;                             forbody
+;;;                             (list 'set iname (list 'op-binary iname (list 'operator "+") step-name)))))))))
 
 (define for-stmt/p
     (do
@@ -322,29 +405,20 @@
                 (pure ret))
             void/p))
         skip/p
+        (pure (scope))
+        (define iname (add-local ivar))
         (string/p "do")
         skip/p
-        (define before locals)
-        (pure (set! locals (cons (cadr ivar) locals)))
         (forbody <- block-body/p)
         skip/p
         (string/p "end")
+        (pure (unscope))
         (pure
-            (let
-                ((iname (list 'name (cadr ivar))))
-                (set! locals before)
-                (list 'block
-                    (list 'local iname ival)
-                    (list 'local (list 'raw-name "for-stop") max)
-                    (list 'local (list 'raw-name "for-step")
-                        (if (void? step)
-                            (list 'number "1")
-                            step))
-                    (list 'while
-                        (list 'op-binary iname (list 'operator "<=") (list 'raw-name "for-stop"))
-                        (list 'block
-                            forbody
-                            (list 'set iname (list 'op-binary iname (list 'operator "+") (list 'raw-name "for-step"))))))))))
+            (list 'for-range (list 'name iname) ival max
+                (if (void? step)
+                    (list 'number "1")
+                    step)
+                forbody))))
 
 (define single/p
     (first/p lambda-expr/p number/p dstring/p parens/p table/p name/p))
@@ -484,8 +558,8 @@
         (expr <- expr/p)
         (pure
             (begin
-                (set! locals (cons (cadr ident) locals))
-                (list 'local (list 'name (cadr ident)) expr)))))
+                (add-local ident)
+                (list 'local (list 'name (find-name (cadr ident))) expr)))))
 
 (define local-function-stmt/p
     (do
@@ -494,26 +568,26 @@
         (string/p "function")
         skip/p
         (ident <- name/p)
-        (define before locals)
+        (pure (add-local ident))
+        (pure (scope))
         skip/p
         (string/p "(")
         skip/p
         (args <- name-args/p)
         skip/p
         (string/p ")")
-        (do void/p (pure (set! locals (cons (cadr ident) locals))))
         skip/p
         (block <- block-body/p)
         skip/p
         (string/p "end")
         (pure
             (begin
-                (set! locals (cons (cadr ident) before))
-                (list 'local (list 'name (cadr ident)) (list 'lambda args block))))))
+                (pure (unscope))
+                (list 'local (list 'name (find-name (cadr ident))) (list 'lambda args block))))))
 
 (define assign-function-stmt/p
     (do
-        (define before locals)
+        (pure (scope))
         (string/p "function")
         skip/p
         (ident <- name/p)
@@ -529,7 +603,7 @@
         (string/p "end")
         (pure
             (begin
-                (set! locals before)
+                (pure (unscope))
                 (list 'set (list 'global (cadr ident)) (list 'lambda args block))))))
 
 (define table-function-stmt/p
@@ -538,7 +612,7 @@
         skip/p
         (first <- name/p)
         skip/p
-        (define before locals)
+        (pure (scope))
         (kind <- (first/p (string/p ":") (string/p ".")))
         skip/p
         (index <- ident/p)
@@ -554,7 +628,7 @@
         (string/p "end")
         (pure
             (begin
-                (set! locals before)
+                (pure (unscope))
                 (list 'set-index first (list 'string index)
                     (list 'lambda
                         (if (equal? kind ":")
@@ -579,7 +653,6 @@
 
 (define stmt/p
     (do
-        (define before locals)
         (ret <- (first/p
             local-function-stmt/p
             assign-function-stmt/p
@@ -613,7 +686,7 @@
         (ret <- block-body/p)
         skip/p
         eof/p
-        (pure (cons 'program (cdr ret)))))
+        (pure (list 'call (list 'lambda (list) ret)))))
 
 (define (parse-text text) 
     (parse-result!
