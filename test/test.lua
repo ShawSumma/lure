@@ -1,12 +1,9 @@
 #lang lua
 
-local function f(x)
-    for i=1, 10 do
-        if x < i then
-            return x * i
-        end
-    end
-    return "???"
+local sqrt = math.sqrt
+
+local function f()
+    return 1
 end
 
-print(f(7))
+print(f())

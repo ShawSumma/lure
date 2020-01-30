@@ -1,14 +1,19 @@
 #lang racket/base
 
 (require racket/list)
+(require racket/cmdline)
+
 (require syntax/parse/define)
+
+(require lua/compiler)
+(require lua/comb/parser)
 
 (define _G (make-hash))
 
-(define nil 'nil)
+(define nil (void))
 
 (define (to-boolean v)
-    (and v (not (equal? v 'nil))))
+    (and v (not (equal? v nil))))
 
 (define-simple-macro (boolean-or a b)
     (let
@@ -26,14 +31,15 @@
         (if (to-boolean av) (if (to-boolean bv) bv #f) #f)))
 
 (define make-return list)
-(define (call func . args)
-    (apply func args))
+
 (define (ecall func . args)
-    (define ret (apply call func args))
+    (define ret (apply func args))
     (cond
         ((not (list? ret)) ret)
         ((empty? ret) nil)
         (else (car ret))))
+
+(define (typeof obj) (error "NOT IMPLEMENTED"))
 
 (define (binary-arith name func)
     (lambda (a b)
@@ -46,17 +52,17 @@
                         (if (equal? amet 'not-found)
                             (if (equal? bmet 'not-found)
                                 (error "error: attempt to perform arithmetic on a table value")
-                                (call bmet a b))
-                            (call amet a b)))
+                                (ecall bmet a b))
+                            (ecall amet a b)))
                     (if (equal? amet 'not-found)
                         (error "error: attempt to perform arithmetic on a table value")
-                        (call amet a b))))
+                        (ecall amet a b))))
             (if (hash? b)
                 (let
                     ((bmet (hash-ref (lib-getmetatable b) name 'not-found)))
                     (if (equal? bmet 'not-found)
                         (error "error: attempt to perform arithmetic on a table value")
-                        (call bmet a b)))
+                        (ecall bmet a b)))
                 (func a b)))))
                 
 (define (builtin-tostring a)
@@ -65,7 +71,7 @@
             ((amet (hash-ref (lib-getmetatable a) "__tostring" 'not-found)))
             (if (equal? amet 'not-found)
                 "<table>"
-                (call amet a)))
+                (ecall amet a)))
         (cond
             ((string? a) a)
             ((equal? a nil) "nil")
@@ -83,17 +89,17 @@
                     (if (equal? amet 'not-found)
                         (if (equal? bmet 'not-found)
                             (error "error: attempt to concatenate a table value")
-                            (call bmet a b))
-                        (call amet a b)))
+                            (ecall bmet a b))
+                        (ecall amet a b)))
                 (if (equal? amet 'not-found)
                     (error "error: attempt to concatenate a table value")
-                    (call amet a b))))
+                    (ecall amet a b))))
         (if (hash? b)
             (let
                 ((bmet (hash-ref (lib-getmetatable b) "__concat" 'not-found)))
                 (if (equal? bmet 'not-found)
                     (error "error: attempt to concatenate a table value")
-                    (call bmet a b)))
+                    (ecall bmet a b)))
             (string-append (builtin-tostring a) (builtin-tostring b)))))
 
 (define builtin-add (binary-arith "__add" +))
@@ -111,6 +117,13 @@
         
 (define (lib-setmetatable tab meta)
     (hash-set! tab 'metatable meta))
+
+(define ns (make-base-namespace))
+(namespace-attach-module (current-namespace) 'lua/locals ns)
+(define (eval-lua stx)
+    (parameterize ([current-namespace ns])
+        (namespace-require 'lua/locals) 
+        (eval stx ns)))
 
 (define (lib-getmetatable tab)
     (let
@@ -131,9 +144,51 @@
             args))
     (newline))
 
+(define (lib-type obj)
+    (symbol->string (typeof obj)))
+
+(define (lib-dostring src)
+    (define ast (parse-stmt-or-expr src))
+    (define stx (compile ast))
+    (define result (eval-lua stx))
+    1)
+
+(define (lib-tonumber n)
+    (cond
+        ((string? n)
+            (let 
+                ((res (string->number n)))
+                (if res res
+                    nil)))
+        ((number? n)
+            n)
+        (else nil)))
+
+(define lib-math (make-hash))
+
+(hash-set! lib-math "sqrt" sqrt)
+
+(define cl (vector->list (current-command-line-arguments)))
+(define lib-arg (make-hash (list (cons 0 "<main>"))))
+(define count 0)
+(void
+    (map
+        (lambda (arg)
+            (set! count (+ count 1))
+            (hash-set! lib-arg count arg))
+        cl))
+
 (hash-set! _G "_G" _G)
 (hash-set! _G "getmetatable" lib-getmetatable)
 (hash-set! _G "setmetatable" lib-setmetatable)
 (hash-set! _G "print" lib-print)
+(hash-set! _G "dostring" lib-dostring)
+(hash-set! _G "rawequal" equal?)
+(hash-set! _G "rawget" hash-ref)
+(hash-set! _G "rawset" hash-set!)
+(hash-set! _G "type" lib-type)
+(hash-set! _G "tonumber" lib-tonumber)
+(hash-set! _G "math" lib-math)
+(hash-set! _G "arg" lib-arg)
 
 (provide (all-defined-out))

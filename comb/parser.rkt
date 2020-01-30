@@ -12,26 +12,33 @@
 (define keywords
     (list
         "and" "break" "do" "end" "else" "elseif"
-        "end" "for" "function" "if" "in" "local"
+        "end" "for" "if" "function" "in" "local"
         "return" "not" "or" "repeat" "return"
         "until" "then" "until" "while"))
 
-(define locals
+(define init-locals
     (list
         (list 2 "true" "true")
         (list 1 "false" "false")
         (list 0 "nil" "nil")))
 
-(define next (length locals))
+(define init-next (length init-locals))
 
-(define (add-local name)
+(define locals init-locals)
+(define next init-next)
+
+(define (add-local name-arg)
+    (define name
+        (if (string? name-arg)
+            name-arg
+                (cadr name-arg)))
     (set! locals
         (cons
             (list
                 next
                 (string-append "local-" (number->string next))
-                (cadr name))
-        locals))
+                name)
+            locals))
     (set! next (+ next 1))
     (find-name name))
 
@@ -54,11 +61,13 @@
                 locals))))
 
 (define (name-okay? name)
-    (empty?
-        (filter
-            (lambda (kw)
-                (equal? (list->string name) kw))
-            keywords)))
+    (and
+        (not (char-numeric? (car name)))
+        (empty?
+            (filter
+                (lambda (kw)
+                    (equal? (list->string name) kw))
+                keywords))))
 
 (define-syntax-rule (self/p base)
     (letrec
@@ -117,22 +126,64 @@
                 (list 'name (find-name str))
                 (list 'global str)))))
 
+(define (comma-sep/p par)
+    (many+/p
+        #:sep (string/p ",")
+        (do
+            skip/p
+            (ident <- par)
+            skip/p
+            (pure ident))))
+
+(define idents/p (comma-sep/p ident/p))
+(define names/p (comma-sep/p name/p))
+(define (exprs/p) (comma-sep/p expr/p))
+
 (define number/p
-    (do
-        (str <- (many+/p digit/p))
-        (pure
-            (list 'number (list->string str)))))
+    (first/p(do
+            (str <- (many+/p digit/p))
+            (string/p ".")
+            (dec <- (many+/p digit/p))
+            (string/p "e")
+            (pm <- (first/p (string/p "+") (string/p "-")))
+            (ex <- (many+/p digit/p))
+            (pure
+                (list 'number
+                    (string-append
+                        (list->string str) "."
+                        (list->string dec) "e"
+                        pm (list->string ex)))))
+        (do
+            (str <- (many+/p digit/p))
+            (string/p ".")
+            (dec <- (many+/p digit/p))
+            (pure
+                (list 'number (string-append (list->string str) "." (list->string dec)))))
+        (do
+            (str <- (many+/p digit/p))
+            (pure
+                (list 'number (list->string str))))))
 
 (define dstring/p
-    (do
-        (char/p #\")
-        (str <- (many/p
-            (satisfy/p
-                (lambda (arg)
-                    (not (equal? arg #\"))))))
-        (char/p #\")
-        (pure
-            (list 'string (list->string str)))))
+    (first/p
+        (do
+            (char/p #\')
+            (str <- (many/p
+                (satisfy/p
+                    (lambda (arg)
+                        (not (equal? arg #\'))))))
+            (char/p #\')
+            (pure
+                (list 'string (list->string str))))
+        (do
+            (char/p #\")
+            (str <- (many/p
+                (satisfy/p
+                    (lambda (arg)
+                        (not (equal? arg #\"))))))
+            (char/p #\")
+            (pure
+                (list 'string (list->string str))))))
 
 (define (bin-expr/p lhs/p rhs/p . parsers)
     (do
@@ -333,60 +384,11 @@
         skip/p
         (pure (list 'while test whiletrue))))
 
-;;; (define for-stmt/p
-;;;     (do
-;;;         (string/p "for")
-;;;         skip/p
-;;;         (ivar <- name/p)
-;;;         skip/p
-;;;         (string/p "=")
-;;;         skip/p
-;;;         (ival <- expr/p)
-;;;         skip/p
-;;;         (string/p ",")
-;;;         skip/p
-;;;         (max <- expr/p)
-;;;         skip/p
-;;;         (step <- (first/p
-;;;             (do
-;;;                 (string/p ",")
-;;;                 skip/p
-;;;                 (ret <- expr/p)
-;;;                 skip/p
-;;;                 (pure ret))
-;;;             void/p))
-;;;         skip/p
-;;;         (string/p "do")
-;;;         skip/p
-;;;         (pure (scope))
-;;;         (pure (add-local ivar))
-;;;         (forbody <- block-body/p)
-;;;         skip/p
-;;;         (string/p "end")
-;;;         (pure
-;;;             (let
-;;;                 ((iname (list 'name (find-name (cadr ivar))))
-;;;                 (stop-name (list 'name (add-local "for-stop")))
-;;;                 (step-name (list 'name (add-local "for-step"))))
-;;;                 (unscope)
-;;;                 (list 'block
-;;;                     (list 'local iname ival)
-;;;                     (list 'local step-name
-;;;                         (if (void? step)
-;;;                             (list 'number "1")
-;;;                             step))
-;;;                     (list 'local stop-name max)
-;;;                     (list 'while
-;;;                         (list 'op-binary iname (list 'operator "<=") stop-name)
-;;;                         (list 'block
-;;;                             forbody
-;;;                             (list 'set iname (list 'op-binary iname (list 'operator "+") step-name)))))))))
-
 (define for-stmt/p
     (do
         (string/p "for")
         skip/p
-        (ivar <- name/p)
+        (ivar <- ident/p)
         skip/p
         (string/p "=")
         skip/p
@@ -435,14 +437,14 @@
                     (do
                         (string/p ":")
                         skip/p
-                        (index <- name/p)
+                        (index <- ident/p)
                         skip/p
                         (string/p "(")
                         skip/p
                         (args <- call-args/p)
                         skip/p
                         (string/p ")")
-                        (pure (set! ret (append (list 'self-call ret (list 'string (cadr index))) args))))
+                        (pure (set! ret (append (list 'self-call ret (list 'string index)) args))))
                     (do
                         (string/p ".")
                         skip/p
@@ -456,6 +458,12 @@
                         (string/p "]")
                         skip/p
                         (pure (set! ret (list 'index ret index))))
+                    (do
+                        (tab <- table/p)
+                        (pure (set! ret (list 'call ret tab))))
+                    (do
+                        (str <- dstring/p)
+                        (pure (set! ret (list 'call ret str))))
                     (do
                         (string/p "(")
                         skip/p
@@ -492,6 +500,7 @@
 
 (define pre-expr/p
     (prefix-expr/p post-expr/p 'self
+        (string/p "#")
         (string/p "not")
         (string/p "-")
         (string/p "+")))
@@ -530,36 +539,27 @@
 
 (define assign-stmt/p
     (do
-        (name <- name/p)
+        (name <- (comma-sep/p
+            (first/p call-expr/p name/p)))
         skip/p
         (string/p "=")
         skip/p
-        (expr <- expr/p)
+        (expr <- (exprs/p))
         (pure (list 'set name expr))))
-    
-(define index-assign-stmt/p
-    (do
-        (fst <- call-expr/p)
-        skip/p
-        skip/p
-        (string/p "=")
-        skip/p
-        (expr <- expr/p)
-        (pure (list 'set-index (cadr fst) (caddr fst) expr))))
 
 (define local-stmt/p
     (do
         (string/p "local")
         skip/p
-        (ident <- name/p)
+        (ident <- idents/p)
         skip/p
         (string/p "=")
         skip/p
-        (expr <- expr/p)
+        (expr <- (exprs/p))
         (pure
             (begin
-                (add-local ident)
-                (list 'local (list 'name (find-name (cadr ident))) expr)))))
+                (map add-local ident)
+                (list 'local (map find-name ident) expr)))))
 
 (define local-function-stmt/p
     (do
@@ -583,7 +583,7 @@
         (pure
             (begin
                 (pure (unscope))
-                (list 'local (list 'name (find-name (cadr ident))) (list 'lambda args block))))))
+                (list 'local1 (list 'name (find-name (cadr ident))) (list 'lambda args block))))))
 
 (define assign-function-stmt/p
     (do
@@ -604,13 +604,13 @@
         (pure
             (begin
                 (pure (unscope))
-                (list 'set (list 'global (cadr ident)) (list 'lambda args block))))))
+                (list 'set1 (list 'global (cadr ident)) (list 'lambda args block))))))
 
 (define table-function-stmt/p
     (do
         (string/p "function")
         skip/p
-        (first <- name/p)
+        (first <- ident/p)
         skip/p
         (pure (scope))
         (kind <- (first/p (string/p ":") (string/p ".")))
@@ -629,7 +629,7 @@
         (pure
             (begin
                 (pure (unscope))
-                (list 'set-index first (list 'string index)
+                (list 'set-index1 first (list 'string index)
                     (list 'lambda
                         (if (equal? kind ":")
                             (cons (list 'name "self") args)
@@ -655,15 +655,14 @@
     (do
         (ret <- (first/p
             local-function-stmt/p
+            local-stmt/p
             assign-function-stmt/p
-            table-function-stmt/p
             assign-stmt/p
-            index-assign-stmt/p
-            expr-stmt/p
+            ;;; table-function-stmt/p
             if-stmt/p
             while-stmt/p
-            for-stmt/p
-            local-stmt/p))
+            expr-stmt/p
+            for-stmt/p))
         (pure ret)))
 
 (define block-body/p
@@ -680,6 +679,10 @@
                     (cons 'block stmts)
                     (append (cons 'block stmts) (list retv)))))))
 
+(define (reset-parser)
+    (set! next init-next)
+    (set! locals init-locals))
+
 (define all/p
     (do
         skip/p
@@ -688,12 +691,28 @@
         eof/p
         (pure (list 'call (list 'lambda (list) ret)))))
 
-(define (parse-text text) 
+(define (parse-text text)
+    (reset-parser)
     (parse-result!
         (parse-string all/p text)))
 
-(define (parse-text-expr text) 
+(define (parse-stmt-or-expr text) 
+    (reset-parser)
     (parse-result!
-        (parse-string expr/p text)))
+        (parse-string
+            (first/p
+                (do
+                    (result <- expr/p)
+                    eof/p
+                    (pure result))
+                all/p)
+            text)))
 
-(provide parse-text)
+(define (parse-complete text (last (make-hash)))
+    (reset-parser)
+    (parse-string (first/p all/p expr/p) text)
+    (append
+        (hash-keys last)
+        (map caddr (cdddr (reverse locals)))))
+
+(provide parse-text parse-stmt-or-expr parse-complete)

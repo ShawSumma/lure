@@ -3,6 +3,7 @@
 (require racket/set)
 (require racket/list)
 (require racket/format)
+(require racket/performance-hint)
 
 (define (zip lis)
     (map cons (range (length lis)) lis))
@@ -40,10 +41,10 @@
     (hash-ref operator-unary-map expr))
 
 (define (compile-string expr)
-    #`#,(cadr expr))
+    (cadr expr))
 
 (define (compile-number expr)
-    #`#,(string->number (cadr expr)))
+    (string->number (cadr expr)))
 
 (define (compile-raw-name expr)
     (string->symbol (cadr expr)))
@@ -56,33 +57,63 @@
         ((equal? str "false") #f)
         (#t (string->symbol str))))
 
-(define (ccall expr type)
+(define (call->value stx)
+    #`(let ((ret #,stx))
+        (cond
+            ((not (list? ret)) ret)
+            ((null? ret) nil)
+            (else (car ret)))))
+
+(define (final-call? expr)
+    (equal? (car expr) 'call))
+
+(define (comp-call expr)
     (define rev (reverse (cddr expr)))
-    (if (or (empty? rev) (not (equal? (caar rev) 'call)))
-        #`(#,type #,(compile (cadr expr))
-            #,@(map compile (cddr expr)))
-        #`(apply #,type #,(compile (cadr expr))
-            #,@(map compile (reverse (cdr rev)))
-            #,(ccall (car rev) 'call))))
+    (if (and (not (empty? rev)) (final-call? (car rev)))
+        #`(let
+            ((res
+                (apply #,(compile (cadr expr))
+                    #,@(map
+                        (lambda (arg)
+                            (call->value (compile arg)))
+                        (reverse (cdr rev)))
+                    #,(comp-call (car rev)))))
+            (if (list? res) res (list res)))
+        #`(let
+            ((res
+                (#,(compile (cadr expr))
+                    #,@(map
+                        (lambda (arg)
+                            (compile arg))
+                        (cddr expr)))))
+            (if (list? res) res (list res)))))
 
 (define (compile-call expr)
-    (ccall expr 'ecall))
-
-(define (compile-self-call expr)
-    #`(letrec
-        ((self #,(compile (cadr expr)))
-        (self-func (hash-ref self #,(compile (caddr expr)) nil)))
-        (call self-func self #,@(map compile (cdddr expr)))))
+    (call->value (comp-call expr)))
 
 (define (find-locals expr)
-    (map (lambda (locv) (compile (cadr locv)))
-        (filter
-            (lambda (sub) (equal? 'local (car sub)))
-            (cdr expr))))
+    (map
+        (lambda (s)
+            (if (string? s)
+                (string->symbol s)
+                s))
+        (foldl
+            (lambda (x y)
+                (if (list? x)
+                    (let
+                        ((names (cadr x)))
+                        (append names y))
+                    (cons x y)))
+            (list)
+            (filter
+                (lambda (sub)
+                    (or
+                        (equal? 'local1 (car sub))
+                        (equal? 'local (car sub))))
+                (cdr expr)))))
 
 (define (compile-basic-block stmt done)
     #`(lambda () stmt #,(done)))
-
 
 (define (compile-op-binary expr)
     (if (empty? (cddr expr))
@@ -93,10 +124,6 @@
 
 (define (compile-op-unary expr)
     #`(#,(compile-operator-unary (cadr expr))
-        #,(compile (caddr expr))))
-
-(define (compile-local expr)
-    #`(set! #,(compile (cadr expr))
         #,(compile (caddr expr))))
 
 (define fnames (list))
@@ -132,20 +159,30 @@
     (set! func-names last-func-names)
     (set! last-block last-last-block)
     (define forward-block-list (reverse block-list))
-    (define ret #`(lambda (#,@(map compile (cadr expr)))
-        #,@(map
-            (lambda (n)
-                #`(define #,n nil))
-            local-names)
-        #,@(map
-            (lambda (block)
-                (define defblock
-                    #`(define (#,(hash-ref block 'call))
-                        #,@(hash-ref block 'code)
-                        #,(hash-ref block 'exit #`(make-return nil))))
-                defblock)
-            forward-block-list)
-        (block-0)))
+    (define ret
+        #`(lambda args
+            #,@(map
+                (lambda (name)
+                    #`(define #,(string->symbol (cadr name))
+                        (if (null? args)
+                            nil
+                            (begin0
+                                (car args)
+                                (set! args (cdr args))))))
+                (cadr expr))
+            #,@(map
+                (lambda (n)
+                    #`(define #,n null))
+                local-names)
+            #,@(map
+                (lambda (block)
+                    (define defblock
+                        #`(define (#,(hash-ref block 'call))
+                            #,@(hash-ref block 'code)
+                            #,(hash-ref block 'exit #`(make-return))))
+                    defblock)
+                forward-block-list)
+            (block-0)))
     (set! block-list last-block-list)
     ret)
 
@@ -158,8 +195,6 @@
                     (void))
                 ((hash? comp)
                     (error "internal error: compiler flow"))
-                    ;;; (hash-set! (car last-block) 'code (append (hash-ref (car last-block) 'code)
-                        ;;; (list #`(#,(hash-ref comp 'call))))))
                 (else
                     (hash-set! (car last-block) 'code (append (hash-ref (car last-block) 'code)
                         (list comp))))))))
@@ -182,7 +217,7 @@
     (define after-iffalse (car block-list))
     (define block (block-push))
     (hash-set! ent 'exit
-        #`(if #,(compile (cadr expr))
+        #`(if (to-boolean #,(compile (cadr expr)))
             (#,(hash-ref iftrue 'call))
             (#,(hash-ref iffalse 'call))))
     (hash-set! after-iftrue 'exit #`(#,(hash-ref block 'call)))
@@ -197,7 +232,7 @@
     (define out-block (block-push))
     (hash-set! body 'exit #`(#,(hash-ref loopb 'call)))
     (hash-set! loopb 'exit
-        #`(if #,(compile (cadr expr))
+        #`(if (to-boolean #,(compile (cadr expr)))
             (#,(hash-ref body 'call))
             (#,(hash-ref out-block 'call))))
     (hash-set! ent 'exit #`(#,(hash-ref loopb 'call)))
@@ -206,6 +241,7 @@
 
 (define forcount 0)
 (define (compile-for expr)
+    (set! forcount (+ forcount 1))
     (define for-step
         (string->symbol
             (string-append "for-step-" (number->string forcount))))
@@ -227,7 +263,8 @@
             #`(set! #,for-stop #,(compile (car (cdddr expr))))
             #`(set! #,for-step #,(compile (cadr (cdddr expr))))))
     (hash-set! iter 'code
-        (list #`(set! #,varname (+ #,varname #,for-step))))
+        (list
+            #`(set! #,varname (+ #,varname #,for-step))))
     (hash-set! loopb 'exit
         #`(if (<= #,varname #,for-stop)
             (#,(hash-ref body 'call))
@@ -237,12 +274,17 @@
     (hash-set! setup 'exit #`(#,(hash-ref loopb 'call)))
     (hash-set! ent 'exit #`(#,(hash-ref setup 'call)))
     (set! last-block (cons out-block (cdr last-block)))
-    (set! forcount (+ forcount 1))
     (void))
 
 (define (compile-return expr)
     (define ent (car last-block))
-    (hash-set! ent 'exit #`(make-return #,@(map compile (cdr expr))))
+    (define rev (reverse (cdr expr)))
+    (hash-set! ent 'exit
+        (if (and (not (empty? rev)) (final-call? (car rev)))
+            #`(apply make-return
+                #,@(map compile (reverse (cdr rev)))
+                #,(comp-call (car rev)))
+            #`(make-return #,@(map compile (cdr expr)))))
     (define block (block-push))
     (set! last-block (cons block (cdr last-block)))
     (void))
@@ -252,7 +294,7 @@
 
 (define (compile-table expr)
     (define local-count 0)
-    #`(let ((table (make-hasheq)))
+    #`(let ((table (make-hash)))
         #,@(map
             (lambda (item)
                 (if (equal? (car item) 'list-part)
@@ -266,17 +308,70 @@
 (define (compile-index expr)
     #`(hash-ref #,(compile (cadr expr)) #,(compile (caddr expr)) nil))
 
-(define (compile-set expr)
-    (if (equal? (caadr expr) 'global)
-        #`(hash-set! _G #,(cadadr expr)
-            #,(compile (caddr expr)))
-        #`(set! #,(compile (cadr expr))
-            #,(compile (caddr expr)))))
+(define (body-values body-expr)
+    (define body-rev (reverse body-expr))
+    (define body-last (car body-rev))
+    (define body-but-last (reverse (cdr body-rev)))
+    (if (final-call? body-last)
+        #`(apply list
+            #,@(map compile body-but-last)
+            #,(comp-call body-last))
+        #`(list #,@(map compile body-expr))))
 
-(define (compile-set-index expr)
-    #`(hash-set! #,(compile (cadr expr))
-        #,(compile (caddr expr))
-        #,(compile (cadddr expr))))
+(define (compile-local expr)
+    #`(let ((set-to-values #,(body-values (caddr expr))))
+        #,@(map
+                (lambda (name)
+                    (define symname (string->symbol name))
+                    #`(if (null? set-to-values)
+                        (set! #,symname nil)
+                        (begin
+                            (set! #,symname
+                                (car set-to-values))
+                            (set! set-to-values (cdr set-to-values)))))
+                (cadr expr))))
+
+(define (compile-set expr)
+    #`(let ((set-to-values #,(body-values (caddr expr))))
+        #,@(map
+                (lambda (name)
+                    (define how-to-set
+                        (cond
+                            ((equal? (car name) 'global)
+                                (list #`hash-set! #`_G (cadr name)))
+                            ((equal? (car name) 'name)
+                                (list #`set! (compile name)))
+                            ((equal? (car name) 'index)
+                                (list #`hash-set!
+                                    (compile (cadr name))
+                                    (compile (caddr name))))
+                            (else (error "internal error: compiler set"))))
+                    #`(if (null? set-to-values)
+                        (#,@how-to-set nil)
+                        (begin
+                            (#,@how-to-set
+                                (car set-to-values))
+                            (set! set-to-values (cdr set-to-values)))))
+                (cadr expr))))
+
+(define (compile-set1 expr)
+    (define name (cadr expr))
+    (define how-to-set
+        (cond
+            ((equal? (car name) 'global)
+                (list #`hash-set! #`_G (cadr name)))
+            ((equal? (car name) 'name)
+                (list #`set! (compile name)))
+            ((equal? (car name) 'index)
+                (list #`hash-set!
+                    (compile (cadr name))
+                    (compile (caddr name))))
+            (else (error "internal error: compiler set"))))
+    #`(#,@how-to-set #,(compile (caddr expr))))
+
+(define (compile-local1 expr)
+    #`(set! #,(compile (cadr expr))
+        #,(compile (caddr expr))))
 
 (define compile-program compile-block)
 (define (compile expr)
@@ -296,10 +391,11 @@
         ((equal? 'op-unary type) (compile-op-unary expr))
         ((equal? 'op-binary type) (compile-op-binary expr))
         ((equal? 'set type) (compile-set expr))
-        ((equal? 'set-index type) (compile-set-index expr))
+        ((equal? 'set1 type) (compile-set1 expr))
         ((equal? 'call type) (compile-call expr))
-        ((equal? 'self-call type) (compile-self-call expr))
+        ;;; ((equal? 'self-call type) (compile-self-call expr))
         ((equal? 'local type) (compile-local expr))
+        ((equal? 'local1 type) (compile-local1 expr))
         ((equal? 'program type) (compile-program expr))
         ((equal? 'block type) (compile-block expr))
         ((equal? 'return type) (compile-return expr))
