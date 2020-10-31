@@ -9,8 +9,10 @@
 (require lua/comb/parser)
 
 (define _G (make-hash))
+(define io (make-hash))
 
 (define nil (void))
+(define nil? void?)
 
 (define (to-boolean v)
     (and v (not (equal? v nil))))
@@ -114,9 +116,11 @@
 
 (define (boolean-neq . v)
     (not (apply equal? v)))
-        
+
+(define metatable-sym (gensym))
+
 (define (lib-setmetatable tab meta)
-    (hash-set! tab 'metatable meta))
+    (hash-set! tab metatable-sym meta))
 
 (define ns (make-base-namespace))
 (namespace-attach-module (current-namespace) 'lua/locals ns)
@@ -127,7 +131,7 @@
 
 (define (lib-getmetatable tab)
     (let
-        ((tab (hash-ref tab 'metatable 'empty-table)))
+        ((tab (hash-ref tab metatable-sym 'empty-table)))
         (if (equal? tab 'empty-table)
             (make-hasheq)
             tab)))

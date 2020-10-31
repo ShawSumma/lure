@@ -276,6 +276,50 @@
     (set! last-block (cons out-block (cdr last-block)))
     (void))
 
+(define (compile-for-iter expr)
+    (set! forcount (+ forcount 1))
+    (define for-iterable
+        (string->symbol
+            (string-append "for-iterable-" (number->string forcount))))
+    (define ent (car last-block))
+    (define body (compile (cadddr expr)))
+    (define setup (block-push))
+    (define loopb (block-push))
+    (define out-block (block-push))
+    (hash-set! body 'exit #`(#,(hash-ref loopb 'call)))
+    (define for-gen-iterable (compile (caddr expr)))
+    (set! fnames (cons for-iterable fnames))
+    (hash-set! setup 'code
+        (list
+            #`(set! #,for-iterable #,for-gen-iterable)))
+    (hash-set! loopb 'exit
+        #`(if
+            (letrec
+                ((set-to-values (#,for-iterable))
+                (original-values set-to-values))
+                #,@(map
+                    (lambda (name)
+                        (define symname (string->symbol name))
+                        (set! fnames (cons symname fnames))
+                        #`(if (null? set-to-values)
+                            (set! #,symname nil)
+                            (begin
+                                (set! #,symname
+                                    (car set-to-values))
+                                (set! set-to-values (cdr set-to-values)))))
+                    (cadr expr))
+                (or
+                    (null? original-values)
+                    (and
+                        (null? (cdr original-values))
+                        (nil? (car original-values)))))
+            (#,(hash-ref out-block 'call))
+            (#,(hash-ref body 'call))))
+    (hash-set! ent 'exit #`(#,(hash-ref setup 'call)))
+    (hash-set! setup 'exit #`(#,(hash-ref loopb 'call)))
+    (set! last-block (cons out-block (cdr last-block)))
+    (void))
+
 (define (compile-return expr)
     (define ent (car last-block))
     (define rev (reverse (cdr expr)))
@@ -386,6 +430,7 @@
         ((equal? 'if type) (compile-if expr))
         ((equal? 'while type) (compile-while expr))
         ((equal? 'for-range type) (compile-for expr))
+        ((equal? 'for-iter type) (compile-for-iter expr))
         ((equal? 'table type) (compile-table expr))
         ((equal? 'index type) (compile-index expr))
         ((equal? 'op-unary type) (compile-op-unary expr))

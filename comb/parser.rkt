@@ -422,6 +422,27 @@
                     step)
                 forbody))))
 
+(define for-iter-stmt/p
+    (do
+        (string/p "for")
+        skip/p
+        (names-raw <- (comma-sep/p name/p))
+        skip/p
+        (string/p "in")
+        skip/p
+        (func <- expr/p)
+        skip/p
+        (pure (scope))
+        (define names (map add-local names-raw))
+        (string/p "do")
+        skip/p
+        (forbody <- block-body/p)
+        skip/p
+        (string/p "end")
+        (pure (unscope))
+        (pure
+            (list 'for-iter names func forbody))))
+
 (define single/p
     (first/p lambda-expr/p number/p dstring/p parens/p table/p name/p))
 
@@ -662,7 +683,8 @@
             if-stmt/p
             while-stmt/p
             expr-stmt/p
-            for-stmt/p))
+            for-stmt/p
+            for-iter-stmt/p))
         (pure ret)))
 
 (define block-body/p
