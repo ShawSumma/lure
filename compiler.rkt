@@ -65,14 +65,17 @@
             (else (car ret)))))
 
 (define (final-call? expr)
-    (equal? (car expr) 'call))
+    (or
+        (equal? (car expr) 'self-call)
+        (equal? (car expr) 'varargs-get)
+        (equal? (car expr) 'call)))
 
-(define (comp-call expr)
+(define (comp-call-actual expr)
     (define rev (reverse (cddr expr)))
     (if (and (not (empty? rev)) (final-call? (car rev)))
         #`(let
             ((res
-                (apply #,(compile (cadr expr))
+                (apply call #,(compile (cadr expr))
                     #,@(map
                         (lambda (arg)
                             (call->value (compile arg)))
@@ -81,15 +84,50 @@
             (if (list? res) res (list res)))
         #`(let
             ((res
-                (#,(compile (cadr expr))
+                (call #,(compile (cadr expr))
                     #,@(map
                         (lambda (arg)
                             (compile arg))
                         (cddr expr)))))
             (if (list? res) res (list res)))))
 
+(define (comp-call expr)
+    (cond
+        ((equal? (car expr) 'call)
+            (comp-call-actual expr))
+        ((equal? (car expr) 'self-call)
+            (comp-self-call expr))
+        (#t (compile expr))))
+
 (define (compile-call expr)
     (call->value (comp-call expr)))
+
+(define (comp-self-call expr)
+    (define rev (reverse (cdddr expr)))
+    #`(let
+        ((self-fun #,(compile (cadr expr)))
+        (to-get #,(compile (caddr expr))))
+        #,(if (and (not (empty? rev)) (final-call? (car rev)))
+            #`(let
+                ((res
+                    (apply call (hash-ref self-fun to-get nil) self-fun
+                        #,@(map
+                            (lambda (arg)
+                                (call->value (compile arg)))
+                            (reverse (cdr rev)))
+                        #,(comp-call (car rev)))))
+                (if (list? res) res (list res)))
+            #`(let
+                ((res
+                    (call (hash-ref self-fun to-get nil) self-fun
+                        #,@(map
+                            (lambda (arg)
+                                (compile arg))
+                            (cdddr expr)))))
+                (if (list? res) res (list res))))))
+
+(define (compile-self-call expr)
+    (call->value (comp-self-call expr)))
 
 (define (find-locals expr)
     (map
@@ -159,29 +197,40 @@
     (set! func-names last-func-names)
     (set! last-block last-last-block)
     (define forward-block-list (reverse block-list))
-    (define ret
-        #`(lambda args
-            #,@(map
-                (lambda (name)
+    (define set-args
+        (map
+            (lambda (name)
+                (if (equal? (car name) 'varargs)
+                    (begin
+                        (set! fnames (cons 'varargs fnames))
+                        #`(begin
+                            (set! varargs args)))
                     #`(define #,(string->symbol (cadr name))
                         (if (null? args)
                             nil
                             (begin0
                                 (car args)
-                                (set! args (cdr args))))))
-                (cadr expr))
-            #,@(map
-                (lambda (n)
-                    #`(define #,n null))
-                local-names)
-            #,@(map
-                (lambda (block)
-                    (define defblock
-                        #`(define (#,(hash-ref block 'call))
-                            #,@(hash-ref block 'code)
-                            #,(hash-ref block 'exit #`(make-return))))
-                    defblock)
-                forward-block-list)
+                                (set! args (cdr args)))))))
+            (cadr expr)))
+    (define define-locals
+        (map
+            (lambda (n)
+                #`(define #,n null))
+            local-names))  
+    (define define-blocks
+        (map
+            (lambda (block)
+                (define defblock
+                    #`(define (#,(hash-ref block 'call))
+                        #,@(hash-ref block 'code)
+                        #,(hash-ref block 'exit #`(make-return))))
+                defblock)
+            forward-block-list))
+    (define ret
+        #`(lambda args
+            #,@set-args
+            #,@define-locals
+            #,@define-blocks
             (block-0)))
     (set! block-list last-block-list)
     ret)
@@ -341,16 +390,17 @@
     #`(let ((table (make-hash)))
         #,@(map
             (lambda (item)
+                (displayln item)
                 (if (equal? (car item) 'list-part)
                     (begin
                         (set! local-count (+ local-count 1))
-                        #`(hash-set! table #,local-count #,(compile (cadr item))))
-                    #`(hash-set! table #,(compile (cadr item)) #,(compile (caddr item)))))
+                        #`(hash-set-lua! table #,local-count #,(compile (cadr item))))
+                    #`(hash-set-lua! table #,(compile (cadr item)) #,(compile (caddr item)))))
             (cdr expr))
         table))
 
 (define (compile-index expr)
-    #`(hash-ref #,(compile (cadr expr)) #,(compile (caddr expr)) nil))
+    #`(hash-ref-lua #,(compile (cadr expr)) #,(compile (caddr expr)) nil))
 
 (define (body-values body-expr)
     (define body-rev (reverse body-expr))
@@ -417,6 +467,9 @@
     #`(set! #,(compile (cadr expr))
         #,(compile (caddr expr))))
 
+(define (compile-varargs-get expr)
+    #`varargs)
+
 (define compile-program compile-block)
 (define (compile expr)
     (define type (car expr))
@@ -438,7 +491,8 @@
         ((equal? 'set type) (compile-set expr))
         ((equal? 'set1 type) (compile-set1 expr))
         ((equal? 'call type) (compile-call expr))
-        ;;; ((equal? 'self-call type) (compile-self-call expr))
+        ((equal? 'self-call type) (compile-self-call expr))
+        ((equal? 'varargs-get type) (compile-varargs-get expr))
         ((equal? 'local type) (compile-local expr))
         ((equal? 'local1 type) (compile-local1 expr))
         ((equal? 'program type) (compile-program expr))

@@ -20,7 +20,7 @@
 (define ns (make-base-namespace))
 (namespace-attach-module (current-namespace) 'lua/locals ns)
 (define (eval-lua stx)
-    (parameterize ([current-namespace ns])
+    (parameterize ((current-namespace ns))
         (namespace-require 'lua/locals) 
         (eval stx ns)))
 
@@ -33,7 +33,7 @@
     _symbol)
 
 (define (repl)
-    (define src (readline "> "))
+    (define src (readline ">>> "))
     (add-history src)
     (define ast (parse-stmt-or-expr src))
     (define stx (compile ast))

@@ -235,16 +235,20 @@
 (define name-args/p
     (many/p
         (do
-            (ret <- name/p)
+            (ret <- (first/p
+                name/p
+                (string/p "...")))
             skip/p
             (first/p
                 (string/p ",")
                 void/p)
             skip/p
             (pure
-                (begin
-                    (add-local ret)
-                    (list 'name (find-name (cadr ret))))))))
+                (if (equal? ret "...")
+                    (list 'varargs)
+                    (begin
+                        (add-local ret)
+                        (list 'name (find-name (cadr ret)))))))))
 
 (define call-args/p
     (do
@@ -443,8 +447,13 @@
         (pure
             (list 'for-iter names func forbody))))
 
+(define varargs/p
+    (do
+        (ret <- (string/p "..."))
+        (pure (list 'varargs-get))))
+
 (define single/p
-    (first/p lambda-expr/p number/p dstring/p parens/p table/p name/p))
+    (first/p varargs/p lambda-expr/p number/p dstring/p parens/p table/p name/p))
 
 (define (post-exprs/p first-arg/p many-arg/p)
     (do
@@ -608,11 +617,11 @@
 
 (define assign-function-stmt/p
     (do
-        (pure (scope))
         (string/p "function")
         skip/p
-        (ident <- name/p)
+        (ident <- (first/p name/p))
         skip/p
+        (pure (scope))
         (string/p "(")
         skip/p
         (args <- name-args/p)
@@ -631,10 +640,10 @@
     (do
         (string/p "function")
         skip/p
-        (first <- ident/p)
+        (first <- name/p)
         skip/p
-        (pure (scope))
         (kind <- (first/p (string/p ":") (string/p ".")))
+        (pure (scope))
         skip/p
         (index <- ident/p)
         skip/p
@@ -650,7 +659,8 @@
         (pure
             (begin
                 (pure (unscope))
-                (list 'set-index1 first (list 'string index)
+                (list 'set1
+                    (list 'index first (list 'string index))
                     (list 'lambda
                         (if (equal? kind ":")
                             (cons (list 'name "self") args)
@@ -679,7 +689,7 @@
             local-stmt/p
             assign-function-stmt/p
             assign-stmt/p
-            ;;; table-function-stmt/p
+            table-function-stmt/p
             if-stmt/p
             while-stmt/p
             expr-stmt/p

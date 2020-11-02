@@ -1,7 +1,9 @@
 #lang racket/base
 
 (require racket/list)
+(require racket/string)
 (require racket/cmdline)
+(require racket/file)
 
 (require syntax/parse/define)
 
@@ -40,6 +42,12 @@
         ((not (list? ret)) ret)
         ((empty? ret) nil)
         (else (car ret))))
+
+(define (call func . args)
+    (define concat (hash-ref (lib-getmetatable func) "__call" 'not-found))
+    (if (equal? concat 'not-found)
+        (apply func args)
+        (apply concat func args)))
 
 (define (typeof obj) (error "NOT IMPLEMENTED"))
 
@@ -111,6 +119,12 @@
 (define builtin-mod (binary-arith "__mod" modulo))
 (define builtin-pow (binary-arith "__pow" expt))
 
+(define (hash-ref-lua ht key default)
+    (hash-ref! ht key default))
+    
+(define (hash-set-lua! ht key value)
+    (hash-set! ht key value))
+
 (define (boolean-eq . v)
     (apply equal? v))
 
@@ -118,6 +132,7 @@
     (not (apply equal? v)))
 
 (define metatable-sym (gensym))
+(define metatable-not-found (gensym))
 
 (define (lib-setmetatable tab meta)
     (hash-set! tab metatable-sym meta))
@@ -130,11 +145,13 @@
         (eval stx ns)))
 
 (define (lib-getmetatable tab)
-    (let
-        ((tab (hash-ref tab metatable-sym 'empty-table)))
-        (if (equal? tab 'empty-table)
-            (make-hasheq)
-            tab)))
+    (if (hash? tab)
+        (let
+            ((tab (hash-ref tab metatable-sym metatable-not-found)))
+            (if (equal? tab metatable-not-found)
+                (make-hash)
+                tab))
+        (make-hash)))
 
 (define (lib-print . args)
     (map
@@ -151,11 +168,11 @@
 (define (lib-type obj)
     (symbol->string (typeof obj)))
 
-(define (lib-dostring src)
-    (define ast (parse-stmt-or-expr src))
+(define (lib-load src)
+    (define ast (parse-text src))
     (define stx (compile ast))
-    (define result (eval-lua stx))
-    1)
+    (define result (lambda () (eval-lua stx)))
+    result)
 
 (define (lib-tonumber n)
     (cond
@@ -168,8 +185,26 @@
             n)
         (else nil)))
 
-(define lib-math (make-hash))
+(define (lib-require spec)
+    (define with-slash (string-replace spec "." "/"))
+    (define try1 (string-append "./" with-slash ".lua"))
+    (define ns (current-namespace))
+    (namespace-require try1 ns)
+    (list (eval #`return ns)))
 
+(define (lib-racket-require spec)
+    (define ns (current-namespace))
+    (namespace-require spec ns)
+    ns)
+
+(define (lib-racket-sym ns sym)
+    (eval (string->symbol sym) ns))
+
+(define lib-racket (make-hash))
+(hash-set! lib-racket "open" lib-racket-require)
+(hash-set! lib-racket "sym" lib-racket-sym)
+
+(define lib-math (make-hash))
 (hash-set! lib-math "sqrt" sqrt)
 
 (define cl (vector->list (current-command-line-arguments)))
@@ -186,13 +221,15 @@
 (hash-set! _G "getmetatable" lib-getmetatable)
 (hash-set! _G "setmetatable" lib-setmetatable)
 (hash-set! _G "print" lib-print)
-(hash-set! _G "dostring" lib-dostring)
+(hash-set! _G "load" lib-load)
 (hash-set! _G "rawequal" equal?)
 (hash-set! _G "rawget" hash-ref)
 (hash-set! _G "rawset" hash-set!)
 (hash-set! _G "type" lib-type)
 (hash-set! _G "tonumber" lib-tonumber)
 (hash-set! _G "math" lib-math)
+(hash-set! _G "racket" lib-racket)
 (hash-set! _G "arg" lib-arg)
+(hash-set! _G "require" lib-require)
 
 (provide (all-defined-out))

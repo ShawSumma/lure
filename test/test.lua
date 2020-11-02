@@ -1,9 +1,7 @@
 #lang lua
 
-local sqrt = math.sqrt
+x = 2
 
-local function f()
-    return 1
-end
+print("Hello, World!")
 
-print(f())
+return 0

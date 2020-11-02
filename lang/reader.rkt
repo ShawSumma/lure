@@ -17,7 +17,8 @@
 (define (lang-read-lit src in)
     (strip-context #`(module in racket/base
         (require lua/locals)
-        (void #,(let
+        (provide return)
+        (define return #,(let
             ((parsed (parse-text (port->string in))))
             (let ((stx (compile parsed)))
                 ;;; (pretty-print (syntax->datum stx))
