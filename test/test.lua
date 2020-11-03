@@ -1,7 +1,5 @@
 #lang lua
 
-x = 2
-
-print("Hello, World!")
-
-return 0
+print((function()
+    return "Hello, World!"
+end)())

@@ -120,8 +120,13 @@
 (define builtin-pow (binary-arith "__pow" expt))
 
 (define (hash-ref-lua ht key default)
-    (hash-ref! ht key default))
-    
+    (cond
+        ((and (hash? ht) (hash-has-key? ht key))
+            (hash-ref! ht key default))
+        ((hash-has-key? (lib-getmetatable ht) "__index")
+            (call (hash-ref-lua (lib-getmetatable ht) "__index" nil) ht key))
+        (#t nil)))
+
 (define (hash-set-lua! ht key value)
     (hash-set! ht key value))
 
@@ -193,9 +198,16 @@
     (list (eval #`return ns)))
 
 (define (lib-racket-require spec)
-    (define ns (current-namespace))
-    (namespace-require spec ns)
-    ns)
+    (make-hash
+        (list
+            (cons metatable-sym
+                (make-hash
+                    (list
+                        (cons "__index"
+                            (lambda (ht name)
+                                (define ns (current-namespace))
+                                (namespace-require (string->symbol spec) ns)
+                                (eval (string->symbol name) ns)))))))))
 
 (define (lib-racket-sym ns sym)
     (eval (string->symbol sym) ns))

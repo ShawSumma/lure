@@ -390,7 +390,6 @@
     #`(let ((table (make-hash)))
         #,@(map
             (lambda (item)
-                (displayln item)
                 (if (equal? (car item) 'list-part)
                     (begin
                         (set! local-count (+ local-count 1))
