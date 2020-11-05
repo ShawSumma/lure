@@ -643,10 +643,10 @@
         (first <- name/p)
         skip/p
         (kind <- (first/p (string/p ":") (string/p ".")))
-        (pure (scope))
         skip/p
         (index <- ident/p)
         skip/p
+        (pure (scope))
         (string/p "(")
         skip/p
         (args <- name-args/p)

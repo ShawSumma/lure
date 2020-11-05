@@ -30,6 +30,7 @@
 (define operator-unary-map
     (hash
         "not" 'boolean-not
+        "#" 'length-lua
         "+" '+
         "-" '-
         "_" '_))
@@ -66,16 +67,19 @@
 
 (define (final-call? expr)
     (or
+        (and
+            (equal? (car expr) 'list-part)
+            (final-call? (cadr expr)))
         (equal? (car expr) 'self-call)
         (equal? (car expr) 'varargs-get)
         (equal? (car expr) 'call)))
 
-(define (comp-call-actual expr)
-    (define rev (reverse (cddr expr)))
+(define (comp-call-actual fun args)
+    (define rev (reverse args))
     (if (and (not (empty? rev)) (final-call? (car rev)))
         #`(let
             ((res
-                (apply call #,(compile (cadr expr))
+                (apply call #,(compile fun)
                     #,@(map
                         (lambda (arg)
                             (call->value (compile arg)))
@@ -84,19 +88,23 @@
             (if (list? res) res (list res)))
         #`(let
             ((res
-                (call #,(compile (cadr expr))
+                (call #,(compile fun)
                     #,@(map
                         (lambda (arg)
                             (compile arg))
-                        (cddr expr)))))
+                        args))))
             (if (list? res) res (list res)))))
 
 (define (comp-call expr)
     (cond
         ((equal? (car expr) 'call)
-            (comp-call-actual expr))
+            (comp-call-actual
+                (cadr expr)
+                (cddr expr)))
         ((equal? (car expr) 'self-call)
             (comp-self-call expr))
+        ((equal? (car expr) 'varargs-get)
+            #`varargs)
         (#t (compile expr))))
 
 (define (compile-call expr)
@@ -202,7 +210,7 @@
             (lambda (name)
                 (if (equal? (car name) 'varargs)
                     (begin
-                        (set! fnames (cons 'varargs fnames))
+                        ;;; (set! fnames (cons 'varargs fnames))
                         #`(begin
                             (set! varargs args)))
                     #`(define #,(string->symbol (cadr name))
@@ -228,6 +236,7 @@
             forward-block-list))
     (define ret
         #`(lambda args
+            (define varargs nil)
             #,@set-args
             #,@define-locals
             #,@define-blocks
@@ -387,16 +396,30 @@
 
 (define (compile-table expr)
     (define local-count 0)
-    #`(let ((table (make-hash)))
-        #,@(map
-            (lambda (item)
-                (if (equal? (car item) 'list-part)
-                    (begin
-                        (set! local-count (+ local-count 1))
-                        #`(hash-set-lua! table #,local-count #,(compile (cadr item))))
-                    #`(hash-set-lua! table #,(compile (cadr item)) #,(compile (caddr item)))))
-            (cdr expr))
-        table))
+    (define rev (reverse (cdr expr)))
+    (define rest (list))
+    (if (and (not (empty? rev)) (final-call? (car rev)))
+        #`(let ((table (make-hash)))
+            #,@(map
+                (lambda (item)
+                    (if (equal? (car item) 'list-part)
+                        (begin
+                            (set! local-count (+ local-count 1))
+                            #`(hash-set-lua! table #,local-count #,(compile (cadr item))))
+                        #`(hash-set-lua! table #,(compile (cadr item)) #,(compile (caddr item)))))
+                (reverse (cdr rev)))
+            (hash-extend-list table #,(+ local-count 1) #,(comp-call (cadar rev)))
+            table)
+        #`(let ((table (make-hash)))
+            #,@(map
+                (lambda (item)
+                    (if (equal? (car item) 'list-part)
+                        (begin
+                            (set! local-count (+ local-count 1))
+                            #`(hash-set-lua! table #,local-count #,(compile (cadr item))))
+                        #`(hash-set-lua! table #,(compile (cadr item)) #,(compile (caddr item)))))
+                (cdr expr))
+            table)))
 
 (define (compile-index expr)
     #`(hash-ref-lua #,(compile (cadr expr)) #,(compile (caddr expr)) nil))

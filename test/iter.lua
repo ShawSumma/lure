@@ -6,7 +6,7 @@ local function range(min, max)
         min = 1
     end
     local count = min
-    return function ()
+    return function (...)
         if count <= max then
             local ret = count
             count = count + 1

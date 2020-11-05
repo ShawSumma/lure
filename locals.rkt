@@ -28,6 +28,14 @@
 (define-simple-macro (boolean-not a)
     (not (to-boolean a)))
 
+(define (first-after-not-in table n)
+    (if (and (hash-has-key? table n) (not (nil? (hash-ref table n nil))))
+        (first-after-not-in table (+ n 1))
+        n))
+
+(define (length-lua table)
+    (- (first-after-not-in table 1) 1))
+
 (define-simple-macro (boolean-and a b)
     (let
         ((av a)
@@ -49,7 +57,15 @@
         (apply func args)
         (apply concat func args)))
 
-(define (typeof obj) (error "NOT IMPLEMENTED"))
+(define (typeof obj)
+    (cond
+        ((hash? obj) "table")
+        ((nil? obj) "nil")
+        ((boolean? obj) "boolean")
+        ((string? obj) "string")
+        ((procedure? obj) "function")
+        ((number? obj) "number")
+        (#t "userdata")))
 
 (define (binary-arith name func)
     (lambda (a b)
@@ -171,13 +187,20 @@
     (newline))
 
 (define (lib-type obj)
-    (symbol->string (typeof obj)))
+    (typeof obj))
 
 (define (lib-load src)
     (define ast (parse-text src))
     (define stx (compile ast))
     (define result (lambda () (eval-lua stx)))
     result)
+
+(define (hash-extend-list table n l)
+    (cond
+        ((not (null? l))
+            (begin
+                (hash-set! table n (car l))
+                (hash-extend-list table (+ n 1) (cdr l))))))
 
 (define (lib-tonumber n)
     (cond
@@ -209,12 +232,21 @@
                                 (namespace-require (string->symbol spec) ns)
                                 (eval (string->symbol name) ns)))))))))
 
-(define (lib-racket-sym ns sym)
-    (eval (string->symbol sym) ns))
+(define (lib-racket-require-str spec)
+    (make-hash
+        (list
+            (cons metatable-sym
+                (make-hash
+                    (list
+                        (cons "__index"
+                            (lambda (ht name)
+                                (define ns (current-namespace))
+                                (namespace-require spec ns)
+                                (eval (string->symbol name) ns)))))))))
 
 (define lib-racket (make-hash))
-(hash-set! lib-racket "open" lib-racket-require)
-(hash-set! lib-racket "sym" lib-racket-sym)
+(hash-set! lib-racket "lib" lib-racket-require)
+(hash-set! lib-racket "open" lib-racket-require-str)
 
 (define lib-math (make-hash))
 (hash-set! lib-math "sqrt" sqrt)
@@ -243,5 +275,6 @@
 (hash-set! _G "racket" lib-racket)
 (hash-set! _G "arg" lib-arg)
 (hash-set! _G "require" lib-require)
+(hash-set! _G "_VERSION" "Lua 5.3")
 
 (provide (all-defined-out))
