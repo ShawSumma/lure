@@ -244,9 +244,17 @@
                                 (namespace-require spec ns)
                                 (eval (string->symbol name) ns)))))))))
 
+(define (lib-racket-tmp-lib spec)
+    (define with-slash (string-replace spec "." "/"))
+    (define try1 (string-append "./" with-slash ".lua.tmp"))
+    (define ns (current-namespace))
+    (namespace-require try1 ns)
+    (list (eval #`return ns)))
+
 (define lib-racket (make-hash))
 (hash-set! lib-racket "lib" lib-racket-require)
 (hash-set! lib-racket "open" lib-racket-require-str)
+(hash-set! lib-racket "tmplib" lib-racket-tmp-lib)
 
 (define lib-math (make-hash))
 (hash-set! lib-math "sqrt" sqrt)

@@ -3,7 +3,6 @@
 (require racket/set)
 (require racket/list)
 (require racket/format)
-(require racket/performance-hint)
 
 (define (zip lis)
     (map cons (range (length lis)) lis))

@@ -11,8 +11,8 @@
 
 (define keywords
     (list
-        "and" "break" "do" "end" "else" "elseif"
-        "end" "for" "if" "function" "in" "local"
+        "and" "break" "do" "else" "elseif" "end"
+        "for" "if" "function" "in" "local"
         "return" "not" "or" "repeat" "return"
         "until" "then" "until" "while"))
 
@@ -82,11 +82,7 @@
             (parse-input (proc) input))))
 
 (define (first/p . parsers)
-    (if (zero? (length (cdr parsers)))
-        (car parsers)
-        (or/p
-            (try/p (car parsers))
-            (apply first/p (cdr parsers)))))
+    (apply or/p (map try/p parsers)))
 
 (define skip/p
     (many/p
@@ -140,7 +136,8 @@
 (define (exprs/p) (comma-sep/p expr/p))
 
 (define number/p
-    (first/p(do
+    (first/p
+        (do
             (str <- (many+/p digit/p))
             (string/p ".")
             (dec <- (many+/p digit/p))
@@ -233,7 +230,7 @@
                 default/p))))
 
 (define name-args/p
-    (many/p
+    (many/p #:sep skip/p
         (do
             (ret <- (first/p
                 name/p
@@ -242,7 +239,6 @@
             (first/p
                 (string/p ",")
                 void/p)
-            skip/p
             (pure
                 (if (equal? ret "...")
                     (list 'varargs)
@@ -254,9 +250,8 @@
     (do
         (define count 0)
         (ret <-
-            (many/p
+            (many/p #:sep skip/p
                 (do
-                    skip/p
                     (lambda/p
                         (lambda ()
                             (if (equal? count 0)
@@ -268,7 +263,6 @@
                                     (pure (void))))))
                     skip/p
                     (ret <- expr/p)
-                    skip/p
                     (pure
                         (begin
                             (set! count (+ count 1))
@@ -339,7 +333,45 @@
             (begin
                 (unscope)
                 (list 'lambda args block)))))
-    
+
+(define if-else-part/p
+    (do
+        skip/p
+        (pure (scope))
+        (ret <- block-body/p)
+        (pure (unscope))
+        skip/p
+        (string/p "end")
+        (pure ret)))
+
+(define if-elseif-part/p
+    (do
+        skip/p
+        (test <- expr/p)
+        skip/p
+        (string/p "then")
+        skip/p
+        (pure (scope))
+        (iftrue <- block-body/p)
+        (pure (unscope))
+        skip/p
+        (more <- if-more/p)
+        (pure (list 'block (list 'if test iftrue more)))))
+
+(define if-more/p
+    (do
+        (res <- (first/p
+            (do
+                (string/p "elseif")
+                if-elseif-part/p)
+            (do
+                (string/p "else")
+                if-else-part/p)
+            (do
+                (string/p "end")
+                (pure (list 'block)))))
+        (pure res)))
+
 (define if-stmt/p
     (do
         (string/p "if")
@@ -351,28 +383,8 @@
         (pure (scope))
         (iftrue <- block-body/p)
         (pure (unscope))
-        skip/p
-        (elseif <-
-            (first/p
-                (do
-                    (string/p "else")
-                    skip/p
-                    (pure (scope))
-                    (ret <- block-body/p)
-                    (pure (unscope))
-                    skip/p
-                    (string/p "end")
-                    skip/p
-                    (pure ret))
-                (do
-                    (string/p "end")
-                    (pure (void)))))
-        skip/p
-        (pure (list 'if test
-            iftrue
-            (if (void? elseif)
-                (list 'block)
-                elseif)))))
+        (more <- if-more/p)
+        (pure (list 'if test iftrue more))))
 
 (define while-stmt/p
     (do
@@ -469,11 +481,20 @@
                         skip/p
                         (index <- ident/p)
                         skip/p
-                        (string/p "(")
-                        skip/p
-                        (args <- call-args/p)
-                        skip/p
-                        (string/p ")")
+                        (args <- (first/p
+                            (do
+                                (marg <- table/p)
+                                (pure (list marg)))
+                            (do
+                                (marg <- dstring/p)
+                                (pure (list marg)))
+                            (do
+                                (string/p "(")
+                                skip/p
+                                (margs <- call-args/p)
+                                skip/p
+                                (string/p ")")
+                                (pure margs))))
                         (pure (set! ret (append (list 'self-call ret (list 'string index)) args))))
                     (do
                         (string/p ".")
@@ -547,6 +568,7 @@
 
 (define add-expr/p
     (bin-expr/p mul-expr/p 'self
+        (string/p "..")
         (string/p "~")
         (string/p "+")
         (string/p "-")))
@@ -583,9 +605,14 @@
         skip/p
         (ident <- idents/p)
         skip/p
-        (string/p "=")
-        skip/p
-        (expr <- (exprs/p))
+        (expr <- (first/p
+            (do
+                (string/p "=")
+                skip/p
+                (exprs/p))
+            (do
+                (pure
+                    (build-list 4 (lambda (n) (list 'block)))))))
         (pure
             (begin
                 (map add-local ident)
@@ -619,7 +646,7 @@
     (do
         (string/p "function")
         skip/p
-        (ident <- (first/p name/p))
+        (ident <- name/p)
         skip/p
         (pure (scope))
         (string/p "(")
@@ -680,21 +707,31 @@
                 (list)
                 expr)))))
 
+(define do-stmt/p
+    (do
+        (string/p "do")
+        skip/p
+        (res <- block-body/p)
+        skip/p
+        (string/p "end")
+        (pure res)))
+
 (define expr-stmt/p call-expr/p)
 
 (define stmt/p
     (do
         (ret <- (first/p
-            local-function-stmt/p
-            local-stmt/p
-            assign-function-stmt/p
-            assign-stmt/p
-            table-function-stmt/p
+            do-stmt/p
             if-stmt/p
             while-stmt/p
-            expr-stmt/p
+            local-stmt/p
             for-stmt/p
-            for-iter-stmt/p))
+            for-iter-stmt/p
+            local-function-stmt/p
+            table-function-stmt/p
+            assign-function-stmt/p
+            assign-stmt/p
+            expr-stmt/p))
         (pure ret)))
 
 (define block-body/p

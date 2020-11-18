@@ -37,7 +37,15 @@ end
 
 coro.status = function(co)
     if co.alive then
-        return "suspended"
+        if co.running then
+            if co == cur then
+                return "normal"
+            else
+                return "running"
+            end
+        else
+            return "suspended"
+        end
     else
         return "dead"
     end
@@ -59,9 +67,10 @@ coro.create = function(f)
     return co
 end
 
-function coro.wrap(fn)
+coro.wrap = function(fn)
+    local co = coro.create(fn)
     return function(...)
-        return coro.resume(coro.create(fn), ...)
+        return coro.resume(co, ...)
     end
 end
 

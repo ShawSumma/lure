@@ -38,7 +38,6 @@
     (add-history src)
     (define ast (parse-stmt-or-expr src))
     (define stx (compile ast))
-    (pretty-print (syntax->datum stx))
     (define result (eval-lua stx))
     (cond
         ((not (void? result)) 
