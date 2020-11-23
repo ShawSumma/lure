@@ -18,6 +18,7 @@
 
 (define init-locals
     (list
+        (list 3 "_ENV" "_ENV")
         (list 2 "true" "true")
         (list 1 "false" "false")
         (list 0 "nil" "nil")))
@@ -31,7 +32,9 @@
     (define name
         (if (string? name-arg)
             name-arg
-                (cadr name-arg)))
+            (if (equal? (car name-arg) 'index)
+                (cadr (caddr name-arg))
+                (cadr name-arg))))
     (set! locals
         (cons
             (list
@@ -92,35 +95,57 @@
                 (many/p
                     (satisfy/p
                         (lambda (x) (not (equal? x #\newline))))))
+            (string/p "\r")
+            (string/p ";")
             (char/p #\space)
             (char/p #\newline))))
 
 (define ident/p
-    (do
-        (ident <- (guard/p
-            (many+/p
-                (or/p
-                    letter/p
-                    digit/p
-                    (char/p #\_)))
-            name-okay?))
-        (pure (list->string ident))))
+        (do
+            (ident <- (guard/p
+                (many+/p
+                    (or/p
+                        letter/p
+                        digit/p
+                        (char/p #\_)))
+                name-okay?))
+            (pure (list->string ident))))
 
 (define (find-name arg)
     (define str (if (list? arg) (cadr arg) arg))
+    ;;; (displayln (map caddr locals))
+    ;;; (displayln str)
+    ;;; (displayln 
+    ;;;     (cadar
+    ;;;         (filter
+    ;;;             (lambda (local)
+    ;;;                 (equal? str (caddr local)))
+    ;;;             locals)))
+    ;;; (newline)
     (cadar
         (filter
             (lambda (local)
                 (equal? str (caddr local)))
             locals)))
 
+(define (make-name ast)
+    (list 'name ast))
+
+(define (make-global ast)
+    (list 'index
+        (list 'name #`#,(string->symbol (find-name "_ENV")))
+        (list 'string ast)))
+
 (define name/p
     (do
-        (str <- ident/p)
+        (str <- (syntax/p ident/p))
         (pure
-            (if (name-defined? str)
-                (list 'name (find-name str))
-                (list 'global str)))))
+            (if (name-defined? (syntax->datum str))
+                (make-name
+                    (datum->syntax #f
+                        (string->symbol (find-name (syntax->datum str)))
+                        str))
+                (make-global (syntax->datum str))))))
 
 (define (comma-sep/p par)
     (many+/p
@@ -132,7 +157,6 @@
             (pure ident))))
 
 (define idents/p (comma-sep/p ident/p))
-(define names/p (comma-sep/p name/p))
 (define (exprs/p) (comma-sep/p expr/p))
 
 (define number/p
@@ -161,23 +185,44 @@
             (pure
                 (list 'number (list->string str))))))
 
+(define descape/p
+    (do
+        (char/p #\\)
+        (chr <- (or/p
+            (char/p #\\)
+            (char/p #\0)
+            (char/p #\r)
+            (char/p #\t)
+            (char/p #\n)))
+        (pure
+            (cond
+                ((equal? chr #\\) #\\)
+                ((equal? chr #\0) #\null)
+                ((equal? chr #\r) #\return)
+                ((equal? chr #\t) #\tab)
+                ((equal? chr #\n) #\newline)))))
+
 (define dstring/p
     (first/p
         (do
             (char/p #\')
             (str <- (many/p
-                (satisfy/p
-                    (lambda (arg)
-                        (not (equal? arg #\'))))))
+                (or/p
+                    descape/p
+                    (satisfy/p
+                        (lambda (arg)
+                            (not (equal? arg #\')))))))
             (char/p #\')
             (pure
                 (list 'string (list->string str))))
         (do
             (char/p #\")
             (str <- (many/p
+                (or/p
+                    descape/p
                 (satisfy/p
                     (lambda (arg)
-                        (not (equal? arg #\"))))))
+                        (not (equal? arg #\")))))))
             (char/p #\")
             (pure
                 (list 'string (list->string str))))))
@@ -233,7 +278,7 @@
     (many/p #:sep skip/p
         (do
             (ret <- (first/p
-                name/p
+                ident/p
                 (string/p "...")))
             skip/p
             (first/p
@@ -244,7 +289,7 @@
                     (list 'varargs)
                     (begin
                         (add-local ret)
-                        (list 'name (find-name (cadr ret)))))))))
+                        (make-name (find-name ret))))))))
 
 (define call-args/p
     (do
@@ -432,7 +477,7 @@
         (string/p "end")
         (pure (unscope))
         (pure
-            (list 'for-range (list 'name iname) ival max
+            (list 'for-range (make-name iname) ival max
                 (if (void? step)
                     (list 'number "1")
                     step)
@@ -624,7 +669,7 @@
         skip/p
         (string/p "function")
         skip/p
-        (ident <- name/p)
+        (ident <- ident/p)
         (pure (add-local ident))
         (pure (scope))
         skip/p
@@ -640,13 +685,15 @@
         (pure
             (begin
                 (pure (unscope))
-                (list 'local1 (list 'name (find-name (cadr ident))) (list 'lambda args block))))))
+                (list 'local-rec
+                    (list (find-name ident))
+                    (list (list 'lambda args block)))))))
 
 (define assign-function-stmt/p
     (do
         (string/p "function")
         skip/p
-        (ident <- name/p)
+        (ident <- ident/p)
         skip/p
         (pure (scope))
         (string/p "(")
@@ -661,7 +708,7 @@
         (pure
             (begin
                 (pure (unscope))
-                (list 'set1 (list 'global (cadr ident)) (list 'lambda args block))))))
+                (list 'set1 (make-global ident) (list 'lambda args block))))))
 
 (define table-function-stmt/p
     (do
@@ -690,7 +737,7 @@
                     (list 'index first (list 'string index))
                     (list 'lambda
                         (if (equal? kind ":")
-                            (cons (list 'name "self") args)
+                            (cons (make-name "self") args)
                             args)
                         block))))))
 
@@ -732,6 +779,8 @@
             assign-function-stmt/p
             assign-stmt/p
             expr-stmt/p))
+        (many/p #:sep skip/p
+            (string/p ";"))
         (pure ret)))
 
 (define block-body/p

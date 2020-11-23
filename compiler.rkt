@@ -49,13 +49,31 @@
 (define (compile-raw-name expr)
     (string->symbol (cadr expr)))
 
-(define (compile-name expr)
+(define (transform-name name)
+    name)
+
+(define (compile-name-syntax expr)
+    (define str (syntax->datum (cadr expr)))
+    (cond
+        ((equal? str 'nil) #`nil)
+        ((equal? str 'true) #t)
+        ((equal? str 'false) #f)
+        (#t (transform-name (cadr expr)))))
+
+(define (compile-name-string expr)
     (define str (cadr expr))
     (cond
         ((equal? str "nil") #`nil)
         ((equal? str "true") #t)
         ((equal? str "false") #f)
-        (#t (string->symbol str))))
+        (#t (transform-name (string->symbol str)))))
+
+(define (compile-name expr)
+    (define namestr (syntax->datum (cadr expr)))
+    ;;; (set! fnames (cons namestr fnames))
+    (if (syntax? (cadr expr))
+        (compile-name-syntax expr)
+        (compile-name-string expr)))
 
 (define (call->value stx)
     #`(let ((ret #,stx))
@@ -117,7 +135,7 @@
         #,(if (and (not (empty? rev)) (final-call? (car rev)))
             #`(let
                 ((res
-                    (apply call (hash-ref self-fun to-get nil) self-fun
+                    (apply call (hash-ref-lua self-fun to-get nil) self-fun
                         #,@(map
                             (lambda (arg)
                                 (call->value (compile arg)))
@@ -126,7 +144,7 @@
                 (if (list? res) res (list res)))
             #`(let
                 ((res
-                    (call (hash-ref self-fun to-get nil) self-fun
+                    (call (hash-ref-lua self-fun to-get nil) self-fun
                         #,@(map
                             (lambda (arg)
                                 (compile arg))
@@ -135,27 +153,6 @@
 
 (define (compile-self-call expr)
     (call->value (comp-self-call expr)))
-
-(define (find-locals expr)
-    (map
-        (lambda (s)
-            (if (string? s)
-                (string->symbol s)
-                s))
-        (foldl
-            (lambda (x y)
-                (if (list? x)
-                    (let
-                        ((names (cadr x)))
-                        (append names y))
-                    (cons x y)))
-            (list)
-            (filter
-                (lambda (sub)
-                    (or
-                        (equal? 'local1 (car sub))
-                        (equal? 'local (car sub))))
-                (cdr expr)))))
 
 (define (compile-basic-block stmt done)
     #`(lambda () stmt #,(done)))
@@ -190,20 +187,17 @@
                 (cons 'call (string->symbol (string-append "block-" (number->string id))))
                 (cons 'code (list))))))
 
+(define (any->symbol thing)
+    (if (symbol? thing)
+        thing
+        (string->symbol thing)))
+
 (define (compile-lambda expr)
     (define last-block-list block-list)
     (define last-last-block last-block)
     (define last-func-names func-names)
     (define last-fnames fnames)
-    (set! fnames (list))
-    (set! block-list (list))
-    (set! last-block (list))
-    (compile (caddr expr))
-    (define local-names fnames)
-    (set! fnames last-fnames)
-    (set! func-names last-func-names)
-    (set! last-block last-last-block)
-    (define forward-block-list (reverse block-list))
+    (define banned-fnames (list))
     (define set-args
         (map
             (lambda (name)
@@ -212,18 +206,41 @@
                         ;;; (set! fnames (cons 'varargs fnames))
                         #`(begin
                             (set! varargs args)))
-                    #`(define #,(string->symbol (cadr name))
+                    #`(define
+                        #,(begin0
+                            (string->symbol (cadr name))
+                            (set! banned-fnames (cons (cadr name) banned-fnames)))
                         (if (null? args)
                             nil
                             (begin0
                                 (car args)
                                 (set! args (cdr args)))))))
             (cadr expr)))
+    (set! fnames banned-fnames)
+    (set! block-list (list))
+    (set! last-block (list))
+    (compile (caddr expr))
+    (define local-names fnames)
+    (set! fnames last-fnames)
+    (set! func-names last-func-names)
+    (set! last-block last-last-block)
+    (define forward-block-list (reverse block-list))
     (define define-locals
         (map
             (lambda (n)
-                #`(define #,n null))
-            local-names))  
+                #`(define #,n nil))
+            (filter
+                (lambda (x)
+                    (empty?
+                        (filter
+                            (lambda (y)
+                                (equal? (any->symbol y) x))
+                            banned-fnames)))
+                (set->list
+                    (list->set
+                        (map
+                            any->symbol
+                            local-names))))))
     (define define-blocks
         (map
             (lambda (block)
@@ -256,14 +273,41 @@
                     (hash-set! (car last-block) 'code (append (hash-ref (car last-block) 'code)
                         (list comp))))))))
 
+(define current-env "_ENV")
+;;; (define (get-env) (compile (list 'name current-env)))
+(define (get-env) #`_G)
+
+;;; (define (find-locals expr)
+;;;     (map
+;;;         (lambda (s)
+;;;             (if (string? s)
+;;;                 (string->symbol s)
+;;;                 s))
+;;;         (foldl
+;;;             (lambda (x y)
+;;;                 (if (list? x)
+;;;                     (let
+;;;                         ((names (cadr x)))
+;;;                         (append names y))
+;;;                     (cons x y)))
+;;;             (list)
+;;;             (filter
+;;;                 (lambda (sub)
+;;;                     (or
+;;;                         (equal? 'local-rec (car sub))
+;;;                         (equal? 'local (car sub))))
+;;;                 (cdr expr)))))
+
 (define (compile-block expr)
-    (define names (set->list (list->set (find-locals expr))))
-    (set! fnames (append names fnames))
+    ;;; (define names (set->list (list->set (find-locals expr))))
+    (define old-env current-env)
+    ;;; (set! fnames (append names fnames))
     (define block (block-push))
     (set! last-block (cons block last-block))
     (map (lambda (stmt) (compile-block-item block stmt)) (cdr expr))
     (define ret (car last-block))
     (set! last-block (cdr last-block))
+    (set! current-env old-env)
     block)
 
 (define (compile-if expr)
@@ -391,7 +435,7 @@
     (void))
 
 (define (compile-global expr)
-    #`(hash-ref _G #,(cadr expr) nil))
+    #`(hash-ref-lua #,(get-env) #,(cadr expr) nil))
 
 (define (compile-table expr)
     (define local-count 0)
@@ -438,6 +482,21 @@
         #,@(map
                 (lambda (name)
                     (define symname (string->symbol name))
+                    (set! fnames (cons symname fnames))
+                    #`(if (null? set-to-values)
+                        (set! #,symname nil)
+                        (begin
+                            (set! #,symname
+                                (car set-to-values))
+                            (set! set-to-values (cdr set-to-values)))))
+                (cadr expr))))
+
+(define (compile-local-rec expr)
+    (set! fnames (append (map string->symbol (cadr expr)) fnames))
+    #`(let ((set-to-values #,(body-values (caddr expr))))
+        #,@(map
+                (lambda (name)
+                    (define symname (string->symbol name))
                     #`(if (null? set-to-values)
                         (set! #,symname nil)
                         (begin
@@ -453,11 +512,11 @@
                     (define how-to-set
                         (cond
                             ((equal? (car name) 'global)
-                                (list #`hash-set! #`_G (cadr name)))
+                                (list #`hash-set-lua! (get-env) (cadr name)))
                             ((equal? (car name) 'name)
                                 (list #`set! (compile name)))
                             ((equal? (car name) 'index)
-                                (list #`hash-set!
+                                (list #`hash-set-lua!
                                     (compile (cadr name))
                                     (compile (caddr name))))
                             (else (error "internal error: compiler set"))))
@@ -474,19 +533,15 @@
     (define how-to-set
         (cond
             ((equal? (car name) 'global)
-                (list #`hash-set! #`_G (cadr name)))
+                (list #`hash-set-lua! (get-env) (cadr name)))
             ((equal? (car name) 'name)
                 (list #`set! (compile name)))
             ((equal? (car name) 'index)
-                (list #`hash-set!
+                (list #`hash-set-lua!
                     (compile (cadr name))
                     (compile (caddr name))))
             (else (error "internal error: compiler set"))))
     #`(#,@how-to-set #,(compile (caddr expr))))
-
-(define (compile-local1 expr)
-    #`(set! #,(compile (cadr expr))
-        #,(compile (caddr expr))))
 
 (define (compile-varargs-get expr)
     #`varargs)
@@ -515,11 +570,17 @@
         ((equal? 'self-call type) (compile-self-call expr))
         ((equal? 'varargs-get type) (compile-varargs-get expr))
         ((equal? 'local type) (compile-local expr))
-        ((equal? 'local1 type) (compile-local1 expr))
+        ((equal? 'local-rec type) (compile-local-rec expr))
         ((equal? 'program type) (compile-program expr))
         ((equal? 'block type) (compile-block expr))
         ((equal? 'return type) (compile-return expr))
-        (#t (error "internal error: compiler"))))
+        ((equal? 'syntax type) expr)
+        (#t (error (string-append "internal error: " (~a type))))))
     ret)
 
-(provide compile)
+(require racket/pretty)
+
+(define (compile-all expr)
+    (compile expr))
+
+(provide (rename-out (compile-all compile)))

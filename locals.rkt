@@ -5,8 +5,6 @@
 (require racket/cmdline)
 (require racket/file)
 
-(require syntax/parse/define)
-
 (require lua/compiler)
 (require lua/comb/parser)
 
@@ -14,18 +12,19 @@
 (define io (make-hash))
 
 (define nil (void))
-(define nil? void?)
+(define (nil? val)
+    (or (void? val) (null? val)))
 
 (define (to-boolean v)
     (and v (not (equal? v nil))))
 
-(define-simple-macro (boolean-or a b)
+(define-syntax-rule (boolean-or a b)
     (let
         ((av a)
         (bv b))
         (if (to-boolean av) av (if (to-boolean bv) bv #f))))
 
-(define-simple-macro (boolean-not a)
+(define (boolean-not a)
     (not (to-boolean a)))
 
 (define (first-after-not-in table n)
@@ -36,7 +35,7 @@
 (define (length-lua table)
     (- (first-after-not-in table 1) 1))
 
-(define-simple-macro (boolean-and a b)
+(define-syntax-rule (boolean-and a b)
     (let
         ((av a)
         (bv b))
@@ -100,7 +99,7 @@
                 (ecall amet a)))
         (cond
             ((string? a) a)
-            ((equal? a nil) "nil")
+            ((nil? a) "nil")
             ((procedure? a) "<function>")
             ((boolean? a) (if a "true" "false"))
             ((number? a) (number->string a)))))
@@ -144,7 +143,11 @@
         (#t nil)))
 
 (define (hash-set-lua! ht key value)
-    (hash-set! ht key value))
+    (cond
+        ((hash-has-key? (lib-getmetatable ht) "__newindex")
+            (call (hash-ref-lua (lib-getmetatable ht) "__newindex") ht key value))
+        (#t
+            (hash-set! ht key value))))
 
 (define (boolean-eq . v)
     (apply equal? v))
@@ -251,6 +254,9 @@
     (namespace-require try1 ns)
     (list (eval #`return ns)))
 
+(define (lib-io-write data)
+    (display (builtin-tostring data)))
+
 (define lib-racket (make-hash))
 (hash-set! lib-racket "lib" lib-racket-require)
 (hash-set! lib-racket "open" lib-racket-require-str)
@@ -258,6 +264,9 @@
 
 (define lib-math (make-hash))
 (hash-set! lib-math "sqrt" sqrt)
+
+(define lib-io (make-hash))
+(hash-set! lib-io "write" lib-io-write)
 
 (define cl (vector->list (current-command-line-arguments)))
 (define lib-arg (make-hash (list (cons 0 "<main>"))))
@@ -270,6 +279,9 @@
         cl))
 
 (hash-set! _G "_G" _G)
+(hash-set! _G "io" lib-io)
+(hash-set! _G "tonumber" lib-tonumber)
+(hash-set! _G "math" lib-math)
 (hash-set! _G "getmetatable" lib-getmetatable)
 (hash-set! _G "setmetatable" lib-setmetatable)
 (hash-set! _G "print" lib-print)
@@ -278,8 +290,6 @@
 (hash-set! _G "rawget" hash-ref)
 (hash-set! _G "rawset" hash-set!)
 (hash-set! _G "type" lib-type)
-(hash-set! _G "tonumber" lib-tonumber)
-(hash-set! _G "math" lib-math)
 (hash-set! _G "racket" lib-racket)
 (hash-set! _G "arg" lib-arg)
 (hash-set! _G "require" lib-require)
