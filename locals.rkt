@@ -2,11 +2,9 @@
 
 (require racket/list)
 (require racket/string)
-(require racket/cmdline)
-(require racket/file)
 
-(require lua/compiler)
-(require lua/comb/parser)
+(require "compiler.rkt")
+(require "comb/parser.rkt")
 
 (define _G (make-hash))
 (define io (make-hash))
@@ -89,10 +87,10 @@
                         (error "error: attempt to perform arithmetic on a table value")
                         (ecall bmet a b)))
                 (func a b)))))
-                
+
 (define (builtin-tostring a)
     (if (hash? a)
-        (let    
+        (let
             ((amet (hash-ref (lib-getmetatable a) "__tostring" 'not-found)))
             (if (equal? amet 'not-found)
                 "<table>"
@@ -165,7 +163,7 @@
 (namespace-attach-module (current-namespace) 'lua/locals ns)
 (define (eval-lua stx)
     (parameterize ([current-namespace ns])
-        (namespace-require 'lua/locals) 
+        (namespace-require 'lua/locals)
         (eval stx ns)))
 
 (define (lib-getmetatable tab)
@@ -208,7 +206,7 @@
 (define (lib-tonumber n)
     (cond
         ((string? n)
-            (let 
+            (let
                 ((res (string->number n)))
                 (if res res
                     nil)))

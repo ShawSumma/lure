@@ -1,12 +1,11 @@
 #lang racket/base
 
 (require racket/port)
-(require racket/format)
 (require racket/pretty)
 
-(require lua/comb/parser)
-(require lua/compiler)
-(require lua/locals)
+(require "../comb/parser.rkt")
+(require "../compiler.rkt")
+(require "../locals.rkt")
 
 (require syntax/strip-context)
 
