@@ -41,6 +41,8 @@
             (displayln (builtin-tostring result))))
     (repl))
 
-(repl)
-
 (provide (all-defined-out))
+
+(module+ main
+  (repl)
+  )
