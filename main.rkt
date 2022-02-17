@@ -3,16 +3,13 @@
 (require racket/string)
 (require racket/set)
 
-(require syntax/strip-context)
 (require readline/readline)
 (require ffi/unsafe)
-(require ffi/unsafe/define)
 
-(require lua/comb/parser)
-(require lua/compiler)
-(require racket/pretty)
+(require "comb/parser.rkt")
+(require "compiler.rkt")
 
-(require lua/locals)
+(require "locals.rkt")
 
 (define intern (ffi-lib #f))
 (define (getbuf)
@@ -22,7 +19,7 @@
 (namespace-attach-module (current-namespace) 'lua/locals ns)
 (define (eval-lua stx)
     (parameterize ((current-namespace ns))
-        (namespace-require 'lua/locals) 
+        (namespace-require 'lua/locals)
         (eval stx ns)))
 
 (set-completion-function!
@@ -40,10 +37,12 @@
     (define stx (compile ast))
     (define result (eval-lua stx))
     (cond
-        ((not (void? result)) 
+        ((not (void? result))
             (displayln (builtin-tostring result))))
     (repl))
 
-(repl)
-
 (provide (all-defined-out))
+
+(module+ main
+  (repl)
+  )

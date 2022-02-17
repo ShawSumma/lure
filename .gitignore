@@ -5,3 +5,7 @@ compiled
 .history
 std
 *.tmp
+
+bench/fib
+main
+test/envmeta
