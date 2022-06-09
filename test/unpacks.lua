@@ -23,7 +23,7 @@ local function unpacks(...)
                 return args[i][j], impl(i, j + 1)
             end
         end
-        if type(args[i]) ~= nil then
+        if type(args[i]) ~= "nil" then
             return args[i], impl(i + 1, 1)
         end
     end
