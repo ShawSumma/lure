@@ -69,7 +69,7 @@
         (#t (transform-name (string->symbol str)))))
 
 (define (compile-name expr)
-    (define namestr (syntax->datum (cadr expr)))
+    ;;; (define namestr (syntax->datum (cadr expr)))
     ;;; (set! fnames (cons namestr fnames))
     (if (syntax? (cadr expr))
         (compile-name-syntax expr)
