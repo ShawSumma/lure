@@ -1,4 +1,4 @@
-#lang curly-fn racket/base
+#lang racket/base
 
 (require data/applicative
          data/monad
@@ -32,10 +32,10 @@
 
 (define (==/p v [=? equal?])
   (label/p (format "~a" v)
-           (satisfy/p #{=? v %})))
+           (satisfy/p (lambda (x) (=? v x)))))
 
 (define (one-of/p vs [=? equal?])
-  (apply or/p (map #{==/p % =?} vs)))
+  (apply or/p (map (lambda (x) (==/p x =?)) vs)))
 
 (define (guard/p p pred? [expected #f] [mk-unexpected values])
   (do [s <- (syntax-box/p p)]

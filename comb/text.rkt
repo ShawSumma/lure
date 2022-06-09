@@ -1,4 +1,4 @@
-#lang curly-fn racket/base
+#lang racket/base
 
 (require data/applicative
          data/monad
@@ -42,8 +42,8 @@
                                 (syntax-line stx-string)
                                 (syntax-column stx-string))))
 
-(define (char/p c)    (label/p (format "'~a'" c) (satisfy/p #{char=? c})))
-(define (char-ci/p c) (label/p (format "'~a'" c) (satisfy/p #{char-ci=? c})))
+(define (char/p c)    (label/p (format "'~a'" c) (satisfy/p (lambda (x) (char=? c x)))))
+(define (char-ci/p c) (label/p (format "'~a'" c) (satisfy/p  (lambda (x) (char-ci=? c x)))))
 (define letter/p      (label/p "letter" (satisfy/p char-alphabetic?)))
 (define digit/p       (label/p "number" (satisfy/p char-numeric?)))
 (define symbolic/p    (label/p "symbolic" (satisfy/p char-symbolic?)))
