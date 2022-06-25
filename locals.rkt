@@ -255,6 +255,15 @@
 (define (lib-io-write data)
     (display (builtin-tostring data)))
 
+(define (lib-string-len str)
+    (string-length str))
+
+(define (lib-string-sub str low high)
+    (substring str (- low 1) high))
+
+(define (lib-string-byte str)
+    (map char->integer (string->list str)))
+
 (define lib-racket (make-hash))
 (hash-set! lib-racket "lib" lib-racket-require)
 (hash-set! lib-racket "open" lib-racket-require-str)
@@ -262,9 +271,16 @@
 
 (define lib-math (make-hash))
 (hash-set! lib-math "sqrt" sqrt)
+(hash-set! lib-math "floor" floor)
+(hash-set! lib-math "ceil" ceiling)
 
 (define lib-io (make-hash))
 (hash-set! lib-io "write" lib-io-write)
+
+(define lib-string (make-hash))
+(hash-set! lib-string "len" lib-string-len)
+(hash-set! lib-string "sub" lib-string-sub)
+(hash-set! lib-string "byte" lib-string-byte)
 
 (define cl (vector->list (current-command-line-arguments)))
 (define lib-arg (make-hash (list (cons 0 "<main>"))))
@@ -278,8 +294,9 @@
 
 (hash-set! _G "_G" _G)
 (hash-set! _G "io" lib-io)
-(hash-set! _G "tonumber" lib-tonumber)
 (hash-set! _G "math" lib-math)
+(hash-set! _G "string" lib-string)
+(hash-set! _G "tonumber" lib-tonumber)
 (hash-set! _G "getmetatable" lib-getmetatable)
 (hash-set! _G "setmetatable" lib-setmetatable)
 (hash-set! _G "print" lib-print)
