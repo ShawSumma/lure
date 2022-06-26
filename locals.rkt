@@ -308,6 +308,7 @@
 (hash-set! _G "racket" lib-racket)
 (hash-set! _G "arg" lib-arg)
 (hash-set! _G "require" lib-require)
+(hash-set! _G "tostring" builtin-tostring)
 (hash-set! _G "_VERSION" "Lua 5.3")
 
 (provide (all-defined-out))
