@@ -2,6 +2,7 @@
 
 (require racket/list)
 (require racket/string)
+(require racket/file)
 
 (require "compiler.rkt")
 (require "comb/parser.rkt")
@@ -156,15 +157,13 @@
 (define builtin-mod (binary-arith "__mod" modulo))
 (define builtin-pow (binary-arith "__pow" expt))
 
-(define (hash-ref-lua ht key default)
+(define (hash-ref-lua ht key (default nil))
     (cond
         ((and (hash? ht) (hash-has-key? ht key))
             (hash-ref! ht key default))
         ((hash-has-key? (lib-getmetatable ht) "__index")
             (let ((mt (lib-getmetatable ht)))
-                (lib-setmetatable ht (make-hash))
-                (let ((ret (call (hash-ref-lua  "__index" nil) ht key)))
-                    (lib-setmetatable ht mt)
+                (let ((ret (call (hash-ref-lua (lib-getmetatable ht) "__index") ht key)))
                     ret)))
         (#t nil)))
 
@@ -307,6 +306,7 @@
 (hash-set! lib-math "ceil" ceiling)
 
 (define lib-io (make-hash))
+(hash-set! lib-io "slurp" file->string)
 (hash-set! lib-io "write" lib-io-write)
 
 (define lib-string (make-hash))

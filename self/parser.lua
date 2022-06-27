@@ -1,5 +1,14 @@
 #lang lua
 
+if io.slurp == nil then
+    io.slurp = function(filename)
+        local f = io.open(filename)
+        local r = f:read('*all')
+        f:close()
+        return r
+    end
+end
+
 local fun = {}
 
 function fun.compose(first, ...)
@@ -187,7 +196,6 @@ function parser.first(...)
 end
 
 function parser.transform(xnext, func)
-    -- assert(type(func) == 'function')
     return function(state, ok, err)
         return xnext(state,
             function(state, data)
@@ -270,28 +278,25 @@ function parser.sep(lis, sep)
     return parser.first(parser.cons(lis, parser.list0(parser.select(2, sep, lis))), parser.accept({}))
 end
 
-local function aststrtab(ast, tab)
+local done = {}
+local function aststr(ast)
     if type(ast) ~= 'table' then
-        tab[#tab + 1] = tostring(ast)
+        return tostring(ast)
     elseif ast.type ~= nil then
+        local tab = {}
         tab[#tab + 1] = '('
         tab[#tab + 1] = ast.type
         if #ast ~= 0 then
             for i=1, #ast do
                 tab[#tab + 1] = ' '
-                aststrtab(ast[i], tab)
+                tab[#tab + 1] = aststr(ast[i], tab)
             end
         end 
         tab[#tab + 1] = ')'
+        return table.concat(tab)
     else
-        tab[#tab + 1] = '?'
+        return '?'
     end
-end
-
-local function aststr(ast)
-    local tab = {}
-    aststrtab(ast, tab)
-    return table.concat(tab)
 end
 
 local lua = {}
@@ -313,8 +318,8 @@ function lua.ast(ast, ...)
     return function(state1, ok, err)
         return next(state1,
             function(state2, data1)
-                local head = {line = state1.line, column = state1.column}
-                local tail = {line = state2.line, column = state2.column}
+                local head = {line = state1.line, col = state1.col}
+                local tail = {line = state2.line, col = state2.col}
                 local pos = {head = head, tail = tail}
                 local data2 = makeast(ast, pos)
                 local datarr = fun.unlist(data1)
@@ -363,12 +368,10 @@ local function iskeyword(id)
 end
 
 function lua.keyword(name)
-    -- assert(iskeyword(name))
     return lua.ignore(lua.wrap(parser.cond(parser.string(name), iskeyword)))
 end
 
 function lua.keywordliteral(name)
-    -- assert(iskeyword(name))
     return parser.cond(parser.string(name), iskeyword)
 end
 
@@ -506,11 +509,9 @@ local function parse(par, str)
     )
 end
 
--- print("start")
-local res = parse(lua.program, 'local x = 1 while x < 100 do x = x * 2 end print(x) ')
+local res = parse(lua.program, io.slurp(arg[1]))
 if res.ok == true then
     print(res.ast)
 else
     print(res.msg)
 end
--- print("end")
