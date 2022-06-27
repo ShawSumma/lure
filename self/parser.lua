@@ -25,7 +25,7 @@ end
 
 function fun.join(arr)
     local function more(low, high)
-        if low == high then
+        if low >= high then
             return arr[low]
         else
             local mid = low/2 + high/2
@@ -51,7 +51,13 @@ end
 local parser = {}
 
 function parser.new(src)
-    return {src=src, line=1, col=1, pos=1, best={pos=0, line=1, col=1}}
+    local ret = {}
+    ret.src=src
+    ret.line=1
+    ret.col=1
+    ret.pos=1
+    ret.best={pos=0, line=1, col=1}
+    return ret
 end
 
 function parser.advance(state, chr)
@@ -103,7 +109,6 @@ function parser.accept(value)
 end
 
 function parser.cond(next, xcond)
-    -- assert(cond ~= nil)
     return function(state, ok, err)
         return next(state,
             function(state, data)
@@ -208,7 +213,7 @@ function parser.cons(parse1, parse2)
 end
 
 function parser.list0(next)
-    local rest
+    local rest = nil
     local function more(state, ok, err)
         return rest(state, ok, function(state2, msg)
             return ok(state, {})
@@ -289,7 +294,6 @@ local function aststr(ast)
     return table.concat(tab)
 end
 
-
 local lua = {}
 
 lua.comment = parser.listof(parser.string('--'), parser.list0(parser.notexact('\n')))
@@ -313,16 +317,16 @@ function lua.ast(ast, ...)
                 local tail = {line = state2.line, column = state2.column}
                 local pos = {head = head, tail = tail}
                 local data2 = makeast(ast, pos)
-                while data1[2] ~= nil do
-                    local val = data1[1]
+                local datarr = fun.unlist(data1)
+                for i=1, #datarr do
+                    local val = datarr[i]
                     if type(val) == 'table' and val.expand == true then
                         for i=1, #val do
                             data2[#data2 + 1] = val[i]
                         end
                     elseif type(val) ~= 'table' or val.ignore ~= true then 
-                        data2[#data2 + 1] = data1[1]
+                        data2[#data2 + 1] = val
                     end
-                    data1 = data1[2]
                 end
                 return ok(state2, data2)
             end,
@@ -346,19 +350,16 @@ function lua.maybe(par)
 end
 
 local astlist = fun.compose(fun.set('expand', true), fun.unlist)
-local isident, iskeyword
-do
-    local keywords = {'if', 'elseif', 'else', 'then', 'while', 'do', 'local', 'end', 'function', 'repeat', 'until', 'return', 'then', 'nil', 'true', 'false', 'in', 'for'}
-    local hashkeywords = {}
-    for i=1, #keywords do
-        hashkeywords[keywords[i]] = keywords[i]
-    end
-    isident = function(id)
-        return hashkeywords[id] == nil
-    end
-    iskeyword = function(id)
-        return hashkeywords[id] ~= nil
-    end
+local keywords = {'if', 'elseif', 'else', 'then', 'while', 'do', 'local', 'end', 'function', 'repeat', 'until', 'return', 'then', 'nil', 'true', 'false', 'in', 'for'}
+local hashkeywords = {}
+for i=1, #keywords do
+    hashkeywords[keywords[i]] = keywords[i]
+end
+local function isident(id)
+    return hashkeywords[id] == nil
+end
+local function iskeyword(id)
+    return hashkeywords[id] ~= nil
 end
 
 function lua.keyword(name)
@@ -433,12 +434,7 @@ local function stringbody(wrap)
     )
 end
 
-lua.string = lua.ast('string', 
-    parser.first(
-        stringbody('"'),
-        stringbody('\'')
-    )
-)
+lua.string = lua.ast('string', parser.first(stringbody('"'), stringbody("'")))
 
 lua.expr = lua.delay('expr')
 lua.chunk = lua.delay('chunk')
@@ -456,11 +452,11 @@ lua.lambda = lua.ast('function', lua.keyword('function'), lua.params, lua.chunk,
 lua.single = parser.first(lua.string, lua.number, lua.lambda, lua.ident, lua.table, lua.literal)
 lua.args = parser.first(lua.ast('call', lua.string), lua.ast('call', lua.table), lua.ast('call', lua.ignore(parser.exact('(')), parser.transform(parser.sep(lua.expr, lua.wrap(parser.exact(','))), astlist), lua.ignore(parser.exact(')'))))
 lua.index = lua.ast('index', lua.ignore(parser.exact('[')), lua.expr, lua.ignore(parser.exact(']')))
-lua.dotindex = lua.ast('dotindex', parser.exact('.'), lua.ident)
-lua.methodcall = lua.ast('method', parser.exact(':'), lua.ident, lua.args)
+lua.dotindex = lua.ast('dotindex', lua.ignore(parser.exact('.')), lua.ident)
+lua.methodcall = lua.ast('method', lua.ignore(parser.exact(':')), lua.ident, lua.args)
 lua.postext = parser.first(lua.args, lua.index, lua.dotindex, lua.methodcall)
 lua.post = lua.ast('postfix', lua.single, parser.transform(parser.list0(lua.postext), astlist))
-lua.pre = parser.first(lua.ast('length', parser.exact('#'), lua.post), lua.post)
+lua.pre = parser.first(lua.ast('length', lua.ignore(parser.exact('#')), lua.post), lua.post)
 
 lua.mulexpr = lua.binop(lua.pre, {'*', '/', '%'})
 lua.addexpr = lua.binop(lua.mulexpr, {'+', '-'})
@@ -498,13 +494,10 @@ lua.chunk = lua.ast('begin', parser.transform(parser.list0(lua.stmt), astlist), 
 lua.langline = lua.ast('langline', lua.ignore(parser.listof(parser.exact('#'), parser.list0(parser.notexact('\n')))))
 lua.program = lua.ast('begin', lua.ignore(lua.maybe(lua.langline)), lua.chunk, lua.ignore(parser.eof))
 
-local function parse(str)
-    return lua.program(
+local function parse(par, str)
+    return par(
         parser.new(str),
         function(state, data)
-            setmetatable(data, {
-                __tostring = function(self) return aststr(self) end
-            })
             return {ok=true, ast=data}
         end,
         function(state, msg)
@@ -513,4 +506,11 @@ local function parse(str)
     )
 end
 
-return parse
+-- print("start")
+local res = parse(lua.addexpr, 'f(x)')
+if res.ok == true then
+    print(res.ast)
+else
+    print(res.msg)
+end
+-- print("end")

@@ -14,7 +14,27 @@
     (or (void? val) (null? val)))
 
 (define (to-boolean v)
-    (and v (not (equal? v nil))))
+    (not (or (equal? v nil) (equal? v #f))))
+
+(define (list-has? lis ent)
+    (cond
+        ((empty? lis) #f)
+        ((equal? (car lis) ent) #t)
+        (#t (list-has? (cdr lis) ent))))
+
+(define (no-enter f)
+    (define tab (list))
+    (lambda args
+        (if (list-has? tab args)
+            nil
+            (begin
+                (set! tab (cons args tab))
+                (apply f args)))))
+
+(define (table->list tab)
+    (define end (length-lua tab))
+    (for/list ((i (in-range 1 (+ end 1))))
+        (hash-ref-lua tab i 'nil)))
 
 (define-syntax-rule (boolean-or a b)
     (let
@@ -88,13 +108,17 @@
                         (ecall bmet a b)))
                 (func a b)))))
 
+(define (builtin-tostring-meta a)
+    (let
+        ((amet (hash-ref (lib-getmetatable a) "__tostring" 'not-found)))
+        (if (equal? amet 'not-found)
+            "<table>"
+            (ecall amet a))))
+(set! builtin-tostring-meta (no-enter builtin-tostring-meta))
+
 (define (builtin-tostring a)
     (if (hash? a)
-        (let
-            ((amet (hash-ref (lib-getmetatable a) "__tostring" 'not-found)))
-            (if (equal? amet 'not-found)
-                "<table>"
-                (ecall amet a)))
+        (builtin-tostring-meta a)
         (cond
             ((string? a) a)
             ((nil? a) "nil")
@@ -137,7 +161,11 @@
         ((and (hash? ht) (hash-has-key? ht key))
             (hash-ref! ht key default))
         ((hash-has-key? (lib-getmetatable ht) "__index")
-            (call (hash-ref-lua (lib-getmetatable ht) "__index" nil) ht key))
+            (let ((mt (lib-getmetatable ht)))
+                (lib-setmetatable ht (make-hash))
+                (let ((ret (call (hash-ref-lua  "__index" nil) ht key)))
+                    (lib-setmetatable ht mt)
+                    ret)))
         (#t nil)))
 
 (define (hash-set-lua! ht key value)
@@ -157,7 +185,8 @@
 (define metatable-not-found (gensym))
 
 (define (lib-setmetatable tab meta)
-    (hash-set! tab metatable-sym meta))
+    (hash-set! tab metatable-sym meta)
+    tab)
 
 (define ns (make-base-namespace))
 (namespace-attach-module (current-namespace) 'lua/locals ns)
@@ -264,6 +293,9 @@
 (define (lib-string-byte str)
     (map char->integer (string->list str)))
 
+(define (lib-table-concat str)
+    (string-join (table->list str) ""))
+
 (define lib-racket (make-hash))
 (hash-set! lib-racket "lib" lib-racket-require)
 (hash-set! lib-racket "open" lib-racket-require-str)
@@ -282,6 +314,9 @@
 (hash-set! lib-string "sub" lib-string-sub)
 (hash-set! lib-string "byte" lib-string-byte)
 
+(define lib-table (make-hash))
+(hash-set! lib-table "concat" lib-table-concat)
+
 (define cl (vector->list (current-command-line-arguments)))
 (define lib-arg (make-hash (list (cons 0 "<main>"))))
 (define count 0)
@@ -296,6 +331,7 @@
 (hash-set! _G "io" lib-io)
 (hash-set! _G "math" lib-math)
 (hash-set! _G "string" lib-string)
+(hash-set! _G "table" lib-table)
 (hash-set! _G "tonumber" lib-tonumber)
 (hash-set! _G "getmetatable" lib-getmetatable)
 (hash-set! _G "setmetatable" lib-setmetatable)

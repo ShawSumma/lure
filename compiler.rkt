@@ -69,8 +69,6 @@
         (#t (transform-name (string->symbol str)))))
 
 (define (compile-name expr)
-    ;;; (define namestr (syntax->datum (cadr expr)))
-    ;;; (set! fnames (cons namestr fnames))
     (if (syntax? (cadr expr))
         (compile-name-syntax expr)
         (compile-name-string expr)))
@@ -203,7 +201,6 @@
             (lambda (name)
                 (if (equal? (car name) 'varargs)
                     (begin
-                        ;;; (set! fnames (cons 'varargs fnames))
                         #`(begin
                             (set! varargs args)))
                     #`(define
@@ -274,34 +271,10 @@
                         (list comp))))))))
 
 (define current-env "_ENV")
-;;; (define (get-env) (compile (list 'name current-env)))
 (define (get-env) #`_G)
 
-;;; (define (find-locals expr)
-;;;     (map
-;;;         (lambda (s)
-;;;             (if (string? s)
-;;;                 (string->symbol s)
-;;;                 s))
-;;;         (foldl
-;;;             (lambda (x y)
-;;;                 (if (list? x)
-;;;                     (let
-;;;                         ((names (cadr x)))
-;;;                         (append names y))
-;;;                     (cons x y)))
-;;;             (list)
-;;;             (filter
-;;;                 (lambda (sub)
-;;;                     (or
-;;;                         (equal? 'local-rec (car sub))
-;;;                         (equal? 'local (car sub))))
-;;;                 (cdr expr)))))
-
 (define (compile-block expr)
-    ;;; (define names (set->list (list->set (find-locals expr))))
     (define old-env current-env)
-    ;;; (set! fnames (append names fnames))
     (define block (block-push))
     (set! last-block (cons block last-block))
     (map (lambda (stmt) (compile-block-item block stmt)) (cdr expr))
@@ -577,8 +550,6 @@
         ((equal? 'syntax type) expr)
         (#t (error (string-append "internal error: " (~a type))))))
     ret)
-
-(require racket/pretty)
 
 (define (compile-all expr)
     (compile expr))
