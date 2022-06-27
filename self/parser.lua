@@ -346,7 +346,7 @@ function lua.ignore(par)
 end
 
 function lua.maybe(par)
-    return lua.ignore(parser.first(par, parser.accept({ignore = true})))
+    return parser.first(par, parser.accept({ignore = true}))
 end
 
 local astlist = fun.compose(fun.set('expand', true), fun.unlist)
@@ -477,7 +477,7 @@ lua.stmtlocalfunction = lua.ast('define',
     lua.keyword('end')
 )
 lua.assigns = lua.ast('assign', lua.posts, lua.ignore(parser.exact('=')), lua.exprs)
-lua.stmtlocal = lua.ast('define', lua.keyword('local'), lua.idents, lua.maybe(parser.select(2, lua.ignore(parser.exact('=')), lua.exprs)))
+lua.stmtlocal = lua.ast('define', lua.keyword('local'), lua.idents, lua.maybe(parser.select(2, parser.exact('='), lua.exprs)))
 lua.ifelse = lua.ast('else', lua.keyword('else'), lua.chunk)
 lua.ifelseif = lua.ast('case', lua.keyword('elseif'), lua.expr, lua.keyword('then'), lua.chunk)
 lua.ifelseifs = parser.transform(parser.list0(lua.ifelseif), astlist)
@@ -507,7 +507,7 @@ local function parse(par, str)
 end
 
 -- print("start")
-local res = parse(lua.addexpr, 'f(x)')
+local res = parse(lua.program, 'local x = 1 while x < 100 do x = x * 2 end print(x) ')
 if res.ok == true then
     print(res.ast)
 else
