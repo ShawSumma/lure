@@ -207,6 +207,7 @@ function parser.transform(xnext, func)
 end
 
 function parser.cons(parse1, parse2)
+    -- assert(parse1 ~= nil)
     return function(state, ok, err)
         return parse1(state,
             function(state, data1)
@@ -274,11 +275,14 @@ function parser.select(n, ...)
     end)
 end
 
-function parser.sep(lis, sep)
-    return parser.first(parser.cons(lis, parser.list0(parser.select(2, sep, lis))), parser.accept({}))
+function parser.sep1(lis, sep)
+    return parser.cons(lis, parser.list0(parser.select(2, sep, lis)))
 end
 
-local done = {}
+function parser.sep(lis, sep)
+    return parser.first(parser.sep1(lis, sep), parser.accept({}))
+end
+
 local function aststr(ast)
     if type(ast) ~= 'table' then
         return tostring(ast)
@@ -289,7 +293,7 @@ local function aststr(ast)
         if #ast ~= 0 then
             for i=1, #ast do
                 tab[#tab + 1] = ' '
-                tab[#tab + 1] = aststr(ast[i], tab)
+                tab[#tab + 1] = aststr(ast[i])
             end
         end 
         tab[#tab + 1] = ')'
@@ -470,17 +474,17 @@ lua.expr = lua.logic
 
 lua.post1 = lua.ast('postfix', lua.single, parser.transform(parser.list1(lua.postext), astlist))
 
-lua.idents = lua.ast('to', parser.transform(parser.sep(lua.ident, parser.exact(',')), astlist))
-lua.exprs = lua.ast('from', parser.transform(parser.sep(lua.expr, parser.exact(',')), astlist))
-lua.posts = lua.ast('to', parser.transform(parser.sep(lua.post, parser.exact(',')), astlist))
+lua.idents = lua.ast('to', parser.transform(parser.sep1(lua.ident, parser.exact(',')), astlist))
+lua.exprs = lua.ast('from', parser.transform(parser.sep1(lua.expr, parser.exact(',')), astlist))
+lua.posts = lua.ast('to', parser.transform(parser.sep1(lua.post, parser.exact(',')), astlist))
 
-lua.stmtlocalfunction = lua.ast('define',
+lua.stmtlocalfunction = lua.ast('local',
     lua.keyword('local'), lua.keyword('function'),
     lua.ident, lua.ast('lambda', lua.params, lua.chunk),
     lua.keyword('end')
 )
 lua.assigns = lua.ast('assign', lua.posts, lua.ignore(parser.exact('=')), lua.exprs)
-lua.stmtlocal = lua.ast('define', lua.keyword('local'), lua.idents, lua.maybe(parser.select(2, parser.exact('='), lua.exprs)))
+lua.stmtlocal = lua.ast('local', lua.keyword('local'), lua.idents, lua.maybe(parser.select(2, parser.exact('='), lua.exprs)))
 lua.ifelse = lua.ast('else', lua.keyword('else'), lua.chunk)
 lua.ifelseif = lua.ast('case', lua.keyword('elseif'), lua.expr, lua.keyword('then'), lua.chunk)
 lua.ifelseifs = parser.transform(parser.list0(lua.ifelseif), astlist)
@@ -490,12 +494,12 @@ lua.stmtfunction = lua.ast('function', lua.keyword('function'), lua.post1, lua.c
 lua.stmtfor = lua.ast('for', lua.keyword('for'), lua.ident, lua.ignore(parser.exact('=')), lua.expr, lua.ignore(parser.exact(',')), lua.expr, lua.maybe(parser.select(2, parser.exact(','), lua.expr)), lua.keyword('do'), lua.chunk, lua.keyword('end'))
 lua.stmtforin = lua.ast('forin', lua.keyword('for'), lua.idents, lua.keyword('in'), lua.exprs, lua.keyword('do'), lua.chunk, lua.keyword('end'))
 lua.stmtdo = parser.select(2, lua.keyword('do'), lua.chunk, lua.keyword('end'))
-lua.stmt = parser.first(lua.stmtif, lua.stmtforin, lua.stmtfor, lua.stmtlocalfunction, lua.stmtlocal, lua.stmtwhile, lua.stmtfunction, lua.post1, lua.assigns, lua.stmtdo)
+lua.stmt = parser.first(lua.stmtif, lua.stmtforin, lua.stmtfor, lua.stmtlocalfunction, lua.stmtlocal, lua.stmtwhile, lua.stmtfunction, lua.assigns, lua.post1, lua.stmtdo)
 lua.stmtreturn = lua.ast('return', lua.keyword('return'), lua.exprs)
 lua.chunk = lua.ast('begin', parser.transform(parser.list0(lua.stmt), astlist), lua.maybe(lua.stmtreturn))
 
 lua.langline = lua.ast('langline', lua.ignore(parser.listof(parser.exact('#'), parser.list0(parser.notexact('\n')))))
-lua.program = lua.ast('begin', lua.ignore(lua.maybe(lua.langline)), lua.chunk, lua.ignore(parser.eof))
+lua.program = lua.ast('program', lua.ignore(lua.maybe(lua.langline)), lua.chunk, lua.ignore(parser.eof))
 
 local function parse(par, str)
     return par(
@@ -509,9 +513,211 @@ local function parse(par, str)
     )
 end
 
+local comp = {}
+
+local function mangle(name)
+    return 'local-' .. name
+end
+
+local ops = {}
+ops['+'] = 'lua.+'
+ops['-'] = 'lua.-'
+ops['*'] = 'lua.*'
+ops['/'] = 'lua./'
+ops['%'] = 'lua.%'
+ops['<'] = 'lua.<'
+ops['>'] = 'lua.>'
+ops['<='] = 'lua.<='
+ops['>='] = 'lua.>='
+ops['=='] = 'lua.=='
+ops['~='] = 'lua.~='
+
+local function syntaxstr(ast, vars)
+    if type(ast) == 'number' then
+        return tostring(ast)
+    elseif type(ast) == 'string' then
+        return '"' .. ast .. '"'
+    elseif ast.type == 'ident' then
+        for i=1, #vars do
+            local level = vars[i]
+            for j=1, #level do
+                if level[j] == ast[1] then
+                    return '(list ' .. mangle(ast[1]) .. ')'
+                end
+            end
+        end
+        return '(list (lua.index _ENV "' .. ast[1] .. '"))'
+    elseif ast.type == 'number' then
+        return '(list ' .. ast[1] .. ')'
+    elseif ast.type == 'program' then
+        local tab = {}
+        tab[#tab + 1] = io.slurp('prelude.rkt')
+        tab[#tab + 1] = '\n'
+        tab[#tab + 1] = '((lambda ()'
+        for i=1, #ast do
+            tab[#tab + 1] = ' '
+            tab[#tab + 1] = syntaxstr(ast[i], vars)
+        end
+        tab[#tab + 1] = '(void)))'
+        return table.concat(tab)
+    elseif ast.type == 'begin' then
+        vars[#vars + 1] = {}
+        local tab = {}
+        tab[#tab + 1] = '((lambda ()'
+        for i=1, #ast do
+            tab[#tab + 1] = ' '
+            tab[#tab + 1] = syntaxstr(ast[i], vars)
+        end
+        tab[#tab + 1] = ' (void)))'
+        vars[#vars] = nil
+        return table.concat(tab)
+    elseif ast.type == 'postfix' then
+        local tab = ast[1]
+        for i=2, #ast do
+            local ent = ast[i]
+            tab = makeast(ent.type, ent.pos, tab)
+            for j=1, #ent do
+                tab[j+1] = ent[j]
+            end
+        end
+        return syntaxstr(tab, vars)
+    elseif ast.type == 'call' then
+        local tab = {}
+        tab[#tab + 1] = '(lua.call (lua.car '
+        tab[#tab + 1] = syntaxstr(ast[1], vars)
+        tab[#tab + 1] = ') (append'
+        for i=2, #ast do
+            tab[#tab + 1] = ' '
+            tab[#tab + 1] = syntaxstr(ast[i], vars)
+        end
+        tab[#tab + 1] = '))'
+        return table.concat(tab)
+    elseif ast.type == 'dotindex' then
+        local tab = {}
+        tab[#tab + 1] = '(lua.index '
+        tab[#tab + 1] = syntaxstr(ast[1], vars)
+        tab[#tab + 1] = ' "'
+        tab[#tab + 1] = ast[2][1]
+        tab[#tab + 1] = '")'
+        return table.concat(tab)
+    elseif ast.type == 'index' then
+        local tab = {}
+        tab[#tab + 1] = '(lua.index '
+        tab[#tab + 1] = syntaxstr(ast[1], vars)
+        tab[#tab + 1] = ' '
+        tab[#tab + 1] = syntaxstr(ast[2], vars)
+        tab[#tab + 1] = ')'
+        return table.concat(tab)
+    elseif ast.type == 'local' then
+        local tab = {}
+        local idents = ast[1]
+        local exprs = ast[2]
+        local cvar = vars[#vars]
+        if idents.type == 'ident' then
+            cvar[#cvar + 1] = idents[1]
+            tab[#tab + 1] = '(define '
+            tab[#tab + 1] = mangle(idents[1])
+            tab[#tab + 1] = ' (lua.car '
+            tab[#tab + 1] = syntaxstr(exprs, vars)
+            tab[#tab + 1] = '))'
+        else
+            tab[#tab + 1] = '(set! lua.tmp'
+            tab[#tab + 1] = ' (append'
+            for i=1, #exprs do
+                tab[#tab + 1] = ' '
+                tab[#tab + 1] = syntaxstr(exprs[i], vars)
+            end
+            tab[#tab + 1] = ')'
+            tab[#tab + 1] = ')'
+            for i=1, #idents do
+                local name = idents[i][1]
+                cvar[#cvar + 1] = name
+                tab[#tab + 1] = '(define '
+                tab[#tab + 1] = mangle(name)
+                tab[#tab + 1] = ' (lua.car lua.tmp)) (set! lua.tmp (lua.cdr lua.tmp))'
+            end
+        end
+        return table.concat(tab)
+    elseif ast.type == 'lambda' then
+        local tab = {}
+        tab[#tab + 1] = '(list '
+        tab[#tab + 1] = '(lambda '
+        local incs = {}
+        if #ast[1] == 1 and ast[1][1].type == 'varargs' then
+            tab[#tab + 1] = 'lua.varargs'
+        else
+            tab[#tab + 1] = '('
+            for i=1, #ast[1] do
+                local arg = ast[1][i]
+                if i ~= 1 then
+                    tab[#tab + 1] = ' '
+                end
+                if arg.type == 'varargs' then
+                    tab[#tab + 1] = '. lua.varargs'
+                else
+                    local name = arg[1]
+                    incs[#incs + 1] = name
+                    tab[#tab + 1] = mangle(name)
+                end
+            end
+            tab[#tab + 1] = ')'
+        end
+        tab[#tab + 1] = '(call/cc (lambda (return)'
+        vars[#vars + 1] = incs
+        tab[#tab + 1] = syntaxstr(ast[2], vars)
+        vars[#vars] = nil
+        tab[#tab + 1] = '(return (list))))))'
+        return table.concat(tab)
+    elseif ast.type == 'return' then
+        local tab = {}
+        tab[#tab + 1] = '(return (append '
+        for i=1, #ast[1] do
+            tab[#tab + 1] = syntaxstr(ast[1][i], vars)
+        end
+        tab[#tab + 1] = '))'
+        return table.concat(tab)
+    elseif ast.type == 'else' then
+        local tab = {}
+        tab[#tab + 1] = '(#t '
+        tab[#tab + 1] = syntaxstr(ast[1], vars)
+        tab[#tab + 1] = ')'
+        return table.concat(tab)
+    elseif ast.type == 'case' then
+        local tab = {}
+        tab[#tab + 1] = '((lua.car '
+        tab[#tab + 1] = syntaxstr(ast[1], vars)
+        tab[#tab + 1] = ') '
+        tab[#tab + 1] = syntaxstr(ast[2], vars)
+        tab[#tab + 1] = ')'
+        return table.concat(tab)
+    elseif ast.type == 'cond' then
+        local tab = {}
+        tab[#tab + 1] = '(cond'
+        for i=1, #ast do
+            tab[#tab + 1] = syntaxstr(ast[i], vars)
+        end
+        tab[#tab + 1] = ')'
+        return table.concat(tab)
+    elseif ast.type == 'varargs' then
+        return 'lua.varargs'
+    elseif ops[ast.type] ~= nil then
+        local tab = {}
+        tab[#tab + 1] = '(list ('
+        tab[#tab + 1] = ops[ast.type]
+        tab[#tab + 1] = ' (lua.car '
+        tab[#tab + 1] = syntaxstr(ast[1], vars)
+        tab[#tab + 1] = ') (lua.car '
+        tab[#tab + 1] = syntaxstr(ast[2], vars)
+        tab[#tab + 1] = ')))'
+        return table.concat(tab)
+    else
+        return '?' .. ast.type
+    end
+end
+
 local res = parse(lua.program, io.slurp(arg[1]))
 if res.ok == true then
-    print(res.ast)
+    print(syntaxstr(res.ast, {{"_ENV"}}))
 else
     print(res.msg)
 end
