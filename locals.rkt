@@ -283,6 +283,9 @@
 (define (lib-io-write data)
     (display (builtin-tostring data)))
 
+(define (lib-io-dump path str)
+    (display-to-file str path #:exists 'replace))
+
 (define (lib-string-len str)
     (string-length str))
 
@@ -308,6 +311,7 @@
 (define lib-io (make-hash))
 (hash-set! lib-io "slurp" file->string)
 (hash-set! lib-io "write" lib-io-write)
+(hash-set! lib-io "dump" lib-io-dump)
 
 (define lib-string (make-hash))
 (hash-set! lib-string "len" lib-string-len)
