@@ -207,6 +207,7 @@ function parser.cons(parse1, parse2)
         return parse1(state,
             function(state, data1)
                 return parse2(state, function(state, data2)
+                    -- print(data1, data2)
                     return ok(state, {data1, data2})
                 end,
                 err)
@@ -285,12 +286,10 @@ local function aststr(ast)
         local tab = {}
         tab[#tab + 1] = '('
         tab[#tab + 1] = ast.type
-        if #ast ~= 0 then
-            for i=1, #ast do
-                tab[#tab + 1] = ' '
-                tab[#tab + 1] = aststr(ast[i])
-            end
-        end 
+        for i=1, #ast do
+            tab[#tab + 1] = ' '
+            tab[#tab + 1] = aststr(ast[i])
+        end
         tab[#tab + 1] = ')'
         return table.concat(tab)
     else
@@ -329,8 +328,9 @@ function lua.ast(ast, ...)
                         for i=1, #val do
                             data2[#data2 + 1] = val[i]
                         end
-                    elseif type(val) ~= 'table' or val.ignore ~= true then 
+                    elseif type(val) ~= 'table' or not val.ignore then 
                         data2[#data2 + 1] = val
+                    else
                     end
                 end
                 return ok(state2, data2)
@@ -359,7 +359,7 @@ local astlist = function(arg)
     res.expand = true
     return res
 end
-local keywords = {'break', 'if', 'elseif', 'else', 'then', 'while', 'do', 'local', 'end', 'function', 'repeat', 'until', 'return', 'then', 'nil', 'true', 'false', 'in', 'for'}
+local keywords = {'not', 'break', 'if', 'elseif', 'else', 'then', 'while', 'do', 'local', 'end', 'function', 'repeat', 'until', 'return', 'then', 'nil', 'true', 'false', 'in', 'for'}
 local hashkeywords = {}
 for i=1, #keywords do
     hashkeywords[keywords[i]] = keywords[i]
@@ -465,7 +465,7 @@ lua.dotindex = lua.ast('dotindex', lua.ignore(parser.exact('.')), lua.ident)
 lua.methodcall = lua.ast('method', lua.ignore(parser.exact(':')), lua.ident, lua.args)
 lua.postext = parser.first(lua.args, lua.index, lua.dotindex, lua.methodcall)
 lua.post = lua.ast('postfix', lua.single, parser.transform(parser.list0(lua.postext), astlist))
-lua.pre = parser.first(lua.ast('length', lua.ignore(parser.exact('#')), lua.post), lua.post)
+lua.pre = parser.first(lua.ast('length', lua.ignore(parser.exact('#')), lua.post), lua.ast('not', lua.keyword('not'), lua.post), lua.post)
 
 lua.mulexpr = lua.binop(lua.pre, {'*', '/', '%'})
 lua.addexpr = lua.binop(lua.mulexpr, {'+', '-'})
@@ -505,15 +505,19 @@ lua.langline = lua.ast('langline', lua.ignore(parser.listof(parser.exact('#'), p
 lua.program = lua.ast('program', lua.ignore(lua.maybe(lua.langline)), lua.chunk, lua.ignore(parser.eof))
 
 local function parse(par, str)
-    return par(
+    local ret = {}
+    par(
         parser.new(str),
         function(state, data)
-            return {ok=true, ast=data}
+            ret.ok = true
+            ret.ast = data
         end,
         function(state, msg)
-            return {ok=false, msg=msg}
+            ret.ok = false
+            ret.msg = msg
         end
     )
+    return ret
 end
 
 local comp = {}
@@ -575,23 +579,29 @@ local function syntaxstr(ast, vars)
         else
             return '?literal'
         end
+    elseif ast.type == 'not' then
+        local tab = {}
+        tab[#tab + 1] = '(lua.list (not (lua.toboolean (lua.car '
+        tab[#tab + 1] = syntaxstr(ast[1], vars)
+        tab[#tab + 1] = '))))'
+        return table.concat(tab)
     elseif ast.type == 'string' then
         return syntaxstr(ast[1], vars)
     elseif ast.type == 'or' then
         local tab = {}
-        tab[#tab + 1] = '(lua.or '
+        tab[#tab + 1] = '(lua.or (lua.car '
         tab[#tab + 1] = syntaxstr(ast[1], vars)
-        tab[#tab + 1] = ' '
+        tab[#tab + 1] = ') (lua.car '
         tab[#tab + 1] = syntaxstr(ast[2], vars)
-        tab[#tab + 1] = ')'
+        tab[#tab + 1] = '))'
         return table.concat(tab)
     elseif ast.type == 'and' then
         local tab = {}
-        tab[#tab + 1] = '(lua.and '
+        tab[#tab + 1] = '(lua.and (lua.car '
         tab[#tab + 1] = syntaxstr(ast[1], vars)
-        tab[#tab + 1] = ' '
+        tab[#tab + 1] = ') (lua.car '
         tab[#tab + 1] = syntaxstr(ast[2], vars)
-        tab[#tab + 1] = ')'
+        tab[#tab + 1] = '))'
         return table.concat(tab)
     elseif ast.type == 'table' then
         local tab = {}
@@ -669,12 +679,12 @@ local function syntaxstr(ast, vars)
         local tab = {}
         tab[#tab + 1] = io.slurp('prelude.rkt')
         tab[#tab + 1] = '\n'
-        tab[#tab + 1] = '((lambda () (let/cc return'
+        tab[#tab + 1] = '(void ((lambda () (let/cc return'
         for i=1, #ast do
-            tab[#tab + 1] = syntaxstr(ast[i], vars)
             tab[#tab + 1] = ' '
+            tab[#tab + 1] = syntaxstr(ast[i], vars)
         end
-        tab[#tab + 1] = '(return lua.nil1))))'
+        tab[#tab + 1] = ' (return lua.nil1)))))'
         return table.concat(tab)
     elseif ast.type == 'begin' then
         local ls = {}
@@ -687,19 +697,19 @@ local function syntaxstr(ast, vars)
         vars[#vars] = nil
         local done = {}
         local defs = {}
-        defs[#defs + 1] = '(let ('
+        defs[#defs + 1] = '(let ((lua.tmp lua.nil) '
         for i=1, #ls do
             local ent = ls[i]
             if done[ent] ~= true then
                 done[ent] = true
                 defs[#defs + 1] = '('
                 defs[#defs + 1] = mangle(ent)
-                defs[#defs + 1] = '  lua.nil) '
+                defs[#defs + 1] = ' lua.nil) '
             end
         end
         defs[#defs + 1] = ')'
         defs[#defs + 1] = table.concat(tab)
-        defs[#defs + 1] = ')'
+        defs[#defs + 1] = ' lua.tmp)'
         return table.concat(defs)
     elseif ast.type == 'postfix' then
         return syntaxstr(unpostfix(ast), vars)

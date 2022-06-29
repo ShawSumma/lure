@@ -73,7 +73,8 @@
 
 (define (lua.> lhs rhs) (lua.< rhs lhs))
 (define (lua.>= lhs rhs) (lua.<= rhs lhs))
-(define (lua.~= lhs rhs) (not (lua.== lhs rhs)))
+(define (lua.~= lhs rhs)
+    (ntot (lua.== lhs rhs))
 
 (define (binary-length tab low)
     (define index (+ low 1))
@@ -136,7 +137,11 @@
         ((procedure? obj) "<function>")
         ((string? obj) (string-append "\"" obj "\""))
         ((number? obj) (number->string obj))
-        ((hash? obj) "<table>")))
+        ((hash? obj)
+            (let ((fun (meta-get obj "__tostring")))
+                (if (lua.nil? fun)
+                    "<table>"
+                    (fun obj))))))
 
 (define arg (vector->list (current-command-line-arguments)))
 
@@ -155,15 +160,19 @@
                     ((not (lua.toboolean thing))
                         (error (lua.tostring err))))
                 thing))
+        (cons "tostring"
+            (lambda (arg)
+                (lua.list (lua.tostring arg))))
         (cons "type"
             (lambda (arg)
-                (cond
-                    ((lua.nil? arg) "nil")
-                    ((boolean? arg) "boolean")
-                    ((procedure? arg) "function")
-                    ((string? arg) "string")
-                    ((number? arg) "number")
-                    ((hash? arg) "table"))))
+                (lua.list
+                    (cond
+                        ((lua.nil? arg) "nil")
+                        ((boolean? arg) "boolean")
+                        ((procedure? arg) "function")
+                        ((string? arg) "string")
+                        ((number? arg) "number")
+                        ((hash? arg) "table")))))
         (cons "print"
             (lambda args
                 (define first #f)
@@ -173,7 +182,7 @@
                         (set! first #t))
                     (display
                         (if (string? arg)
-                            args
+                            arg
                             (lua.tostring arg))))
                 (newline)
                 lua.nil1))
@@ -182,7 +191,8 @@
                 (list
                     (cons "concat"
                         (lambda (arg (sep ""))
-                            (string-join (table->list arg) sep))))))
+                            (list
+                                (string-join (table->list arg) sep)))))))
         (cons "string"
             (make-hash
                 (list
