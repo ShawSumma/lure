@@ -3,6 +3,7 @@
 (require racket/list)
 (require racket/file)
 (require racket/string)
+(require racket/format)
 
 (define lua.meta (gensym))
 (define lua.nometa (gensym))
@@ -18,9 +19,9 @@
     (define value (hash-ref tab key lua.nil))
     (if (lua.nil? value)
         (let ((val (meta-get tab "__index")))
-            (if (lua.nil? val)
-                lua.nil
-                (lua.call val (list tab key))))
+            (if (procedure? val)
+                (lua.call val (list tab key))
+                lua.nil))
         value))
 
 (define (lua.setindex! tab key value)
@@ -40,7 +41,7 @@
 (define (meta-get tab name)
     (define meta (get-meta tab))
     (if (hash? meta)
-        (lua.index tab name)
+        (lua.index meta name)
         lua.nil))
 
 (define (meta-op op name)
@@ -70,23 +71,24 @@
 (define (lua.== lhs rhs)
     (equal? lhs rhs))
 
-(define (lua.> lhs rhs) (not (lua.< lhs rhs)))
-(define (lua.>= lhs rhs) (not (lua.<= lhs rhs)))
+(define (lua.> lhs rhs) (lua.< rhs lhs))
+(define (lua.>= lhs rhs) (lua.<= rhs lhs))
 (define (lua.~= lhs rhs) (not (lua.== lhs rhs)))
 
 (define (binary-length tab low)
-    (if (lua.nil? (lua.index tab low))
-        (- low 1)
-        (binary-length tab (+ low 1))))
+    (define index (+ low 1))
+    (if (lua.nil? (hash-ref tab index lua.nil))
+        low
+        (binary-length tab index)))
 
 (define (lua.length tab)
-    (binary-length tab 1))
+    (binary-length tab 0))
 
 (define (lua.flat . args)
     (flatten args))
 
 (define (lua.call fun . args)
-    (apply fun (flatten args)))
+    (apply fun (lua.flat args)))
 
 (define (lua.list . args)
     args)
@@ -132,7 +134,7 @@
         ((equal? obj #t) "true")
         ((equal? obj #f) "false")
         ((procedure? obj) "<function>")
-        ((string? obj) obj)
+        ((string? obj) (string-append "\"" obj "\""))
         ((number? obj) (number->string obj))
         ((hash? obj) "<table>")))
 
@@ -147,6 +149,12 @@
         (cons "arg"
             (for/hash ((ent arg) (i (in-range 1 (+ 1 (length arg)))))
                 (values i ent)))
+        (cons "assert"
+            (lambda (thing (err lua.nil))
+                (cond
+                    ((not (lua.toboolean thing))
+                        (error (lua.tostring err))))
+                thing))
         (cons "type"
             (lambda (arg)
                 (cond
@@ -163,15 +171,18 @@
                     (if first
                         (display #\tab)
                         (set! first #t))
-                    (display (lua.tostring arg)))
+                    (display
+                        (if (string? arg)
+                            args
+                            (lua.tostring arg))))
                 (newline)
-                (list lua.nil)))
+                lua.nil1))
         (cons "table"
             (make-hash
                 (list
                     (cons "concat"
                         (lambda (arg (sep ""))
-                            (string-join (map lua.tostring (table->list arg)) sep))))))
+                            (string-join (table->list arg) sep))))))
         (cons "string"
             (make-hash
                 (list
@@ -189,9 +200,10 @@
                 (list
                     (cons "dump"
                         (lambda (filename data . nils)
-                            (display-to-file data filename)
+                            (display-to-file data filename #:exists 'replace)
                             lua.nil1))
                     (cons "slurp"
                         (lambda (name . nils)
                             (list (file->string name))))))))))
 (hash-set! _ENV "_G" _ENV)
+(define local-_ENV _ENV)

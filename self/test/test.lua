@@ -1,7 +1,5 @@
-local function put(first, ...)
-    if first ~= nil then
-        put(...)
-    end
+local t = {}
+for i=1, 100 do
+    t[#t + 1] = i
 end
-
-put(1,2 ,3 ,4 ,5 ,6)
+print(#t)

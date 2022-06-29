@@ -1,6 +1,6 @@
 #lang lua
 
-table = {}
+table = table or {}
 
 function table.unpack(tab)
     local function impl(n)
