@@ -8,8 +8,6 @@
 (define lua.meta (gensym))
 (define lua.nometa (gensym))
 
-(define lua.tmp (void))
-
 (define lua.nil (void))
 (define lua.nil? void?)
 
@@ -20,7 +18,7 @@
     (if (lua.nil? value)
         (let ((val (meta-get tab "__index")))
             (if (procedure? val)
-                (lua.call val (list tab key))
+                (lua.car (lua.call val (list tab key)))
                 lua.nil))
         value))
 
@@ -46,21 +44,29 @@
 
 (define (meta-op op name)
     (lambda (lhs rhs)
-        (cond ((not (number? lhs)) (set! lhs (lua.tonumber lhs))))
-        (cond ((not (number? rhs)) (set! rhs (lua.tonumber rhs))))
         (if (hash? lhs)
             (let ((got (meta-get lhs name)))
                 (if (lua.nil? got)
                     (op lhs rhs)
-                    (got lhs rhs)))
+                    (lua.car (got lhs rhs))))
             (op lhs rhs))))
 
-(define lua.+ (meta-op + "__add"))
-(define lua.- (meta-op - "__sub"))
-(define lua.* (meta-op * "__mul"))
-(define lua./ (meta-op / "__div"))
-(define lua.% (meta-op modulo "__mod"))
-(define lua.concat (meta-op (lambda (lhs rhs) (string-append (lua.tostring lhs) (lua.tostring rhs))) "__concat"))
+(define (number-op fun)
+    (lambda args
+        (apply fun (map lua.tonumber args))))
+
+(define lua.+ (meta-op (number-op +) "__add"))
+(define lua.- (meta-op (number-op -) "__sub"))
+(define lua.* (meta-op (number-op *) "__mul"))
+(define lua./ (meta-op (number-op /) "__div"))
+(define lua.% (meta-op (number-op modulo) "__mod"))
+(define (lua.concat lhs rhs)
+    (if (hash? lhs)
+        (let ((got (meta-get lhs "__concat")))
+            (if (lua.nil? got)
+                (string-append lhs rhs)
+                (got lhs rhs)))
+        (string-append lhs rhs)))
 
 (define (lua.< lhs rhs)
     (< lhs rhs))
@@ -74,7 +80,7 @@
 (define (lua.> lhs rhs) (lua.< rhs lhs))
 (define (lua.>= lhs rhs) (lua.<= rhs lhs))
 (define (lua.~= lhs rhs)
-    (ntot (lua.== lhs rhs))
+    (not (lua.== lhs rhs)))
 
 (define (binary-length tab low)
     (define index (+ low 1))
@@ -86,10 +92,13 @@
     (binary-length tab 0))
 
 (define (lua.flat . args)
-    (flatten args))
+    (apply append args))
+
+;;; (define (lua.flat . args)
+;;;     (flatten args))
 
 (define (lua.call fun . args)
-    (apply fun (lua.flat args)))
+    (apply fun (apply lua.flat args)))
 
 (define (lua.list . args)
     args)
@@ -135,22 +144,25 @@
         ((equal? obj #t) "true")
         ((equal? obj #f) "false")
         ((procedure? obj) "<function>")
-        ((string? obj) (string-append "\"" obj "\""))
+        ((string? obj) obj)
         ((number? obj) (number->string obj))
         ((hash? obj)
             (let ((fun (meta-get obj "__tostring")))
                 (if (lua.nil? fun)
                     "<table>"
-                    (fun obj))))))
+                    (lua.car (fun obj)))))
+        (#t "<userdata>")))
 
 (define arg (vector->list (current-command-line-arguments)))
 
 (define _ENV (make-hash
     (list
+        (cons "racket"
+            #t)
         (cons "setmetatable"
             (lambda (tab meta)
                 (hash-set! tab lua.meta meta)
-                tab))
+                (list tab)))
         (cons "arg"
             (for/hash ((ent arg) (i (in-range 1 (+ 1 (length arg)))))
                 (values i ent)))
@@ -159,7 +171,7 @@
                 (cond
                     ((not (lua.toboolean thing))
                         (error (lua.tostring err))))
-                thing))
+                (lua.list thing)))
         (cons "tostring"
             (lambda (arg)
                 (lua.list (lua.tostring arg))))
@@ -172,7 +184,8 @@
                         ((procedure? arg) "function")
                         ((string? arg) "string")
                         ((number? arg) "number")
-                        ((hash? arg) "table")))))
+                        ((hash? arg) "table")
+                        (#t "userdata")))))
         (cons "print"
             (lambda args
                 (define first #f)
@@ -189,6 +202,8 @@
         (cons "table"
             (make-hash
                 (list
+                    (cons "unpack"
+                        (lambda (tab) (table->list tab)))
                     (cons "concat"
                         (lambda (arg (sep ""))
                             (list
@@ -196,12 +211,17 @@
         (cons "string"
             (make-hash
                 (list
+                    (cons "byte"
+                        (lambda (str)
+                            (list (char->integer (car (string->list str))))))
                     (cons "sub"
                         (lambda (str start (end lua.nil) . nils)
                             (list
                                 (substring str
                                     (- start 1)
-                                    (- (if (lua.nil? end) (string-length str) end) 1)))))
+                                    (if (lua.nil? end)
+                                        (string-length str)
+                                        end)))))
                     (cons "len"
                         (lambda (str)
                             (list (string-length str)))))))

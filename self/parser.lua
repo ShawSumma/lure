@@ -207,7 +207,6 @@ function parser.cons(parse1, parse2)
         return parse1(state,
             function(state, data1)
                 return parse2(state, function(state, data2)
-                    -- print(data1, data2)
                     return ok(state, {data1, data2})
                 end,
                 err)
@@ -324,18 +323,19 @@ function lua.ast(ast, ...)
                 local datarr = fun.unlist(data1)
                 for i=1, #datarr do
                     local val = datarr[i]
-                    if type(val) == 'table' and val.expand == true then
+                    if type(val) == 'table' and val.expand then
                         for i=1, #val do
                             data2[#data2 + 1] = val[i]
                         end
                     elseif type(val) ~= 'table' or not val.ignore then 
                         data2[#data2 + 1] = val
-                    else
                     end
                 end
                 return ok(state2, data2)
             end,
-            err
+            function(state, msg)
+                return err(state, msg)
+            end
         )
     end
 end
@@ -453,9 +453,8 @@ lua.ident = lua.ast('ident', parser.cond(lua.name, isident))
 lua.params = lua.ast('params', lua.ignore(parser.exact('(')), parser.transform(parser.sep(parser.first(lua.varargs, lua.ident), parser.exact(',')), astlist), lua.ignore(parser.exact(')')))
 lua.fieldnamed = lua.ast('fieldnamed', lua.ident, lua.ignore(parser.exact('=')), lua.expr)
 lua.fieldnth = lua.ast('fieldnth', lua.expr)
-lua.fieldvar = lua.ast('fieldvar', lua.varargs)
 lua.fieldvalue = lua.ast('fieldvalue', lua.ignore(parser.exact('[')), lua.expr, parser.exact(']'), lua.ignore(parser.exact('=')), lua.expr)
-lua.field = parser.first(lua.fieldvar, lua.fieldnamed, lua.fieldnth, lua.fieldvalue)
+lua.field = parser.first(lua.fieldnamed, lua.fieldnth, lua.fieldvalue)
 lua.table = lua.ast('table', lua.ignore(parser.exact('{')), parser.transform(parser.sep(lua.field, parser.exact(',')), astlist), lua.ignore(parser.exact('}')))
 lua.lambda = lua.ast('lambda', lua.keyword('function'), lua.params, lua.chunk, lua.keyword('end'))
 lua.single = parser.first(lua.string, lua.number, lua.lambda, lua.ident, lua.table, lua.literal)
@@ -501,13 +500,14 @@ lua.stmt = parser.first(lua.stmtbreak, lua.stmtif, lua.stmtforin, lua.stmtfor, l
 lua.stmtreturn = lua.ast('return', lua.keyword('return'), lua.exprs)
 lua.chunk = lua.ast('begin', parser.transform(parser.list0(lua.stmt), astlist), lua.maybe(lua.stmtreturn))
 
-lua.langline = lua.ast('langline', lua.ignore(parser.listof(parser.exact('#'), parser.list0(parser.notexact('\n')))))
+lua.langline = parser.listof(parser.exact('#'), parser.list0(parser.notexact('\n')))
 lua.program = lua.ast('program', lua.ignore(lua.maybe(lua.langline)), lua.chunk, lua.ignore(parser.eof))
 
 local function parse(par, str)
     local ret = {}
+    local state = parser.new(str)
     par(
-        parser.new(str),
+        state,
         function(state, data)
             ret.ok = true
             ret.ast = data
@@ -614,12 +614,10 @@ local function syntaxstr(ast, vars)
                 tab[#tab + 1] = '" (lua.car'
                 tab[#tab + 1] = syntaxstr(field[2], vars)
                 tab[#tab + 1] = '))'
-            elseif field.type == 'fieldvar' then
-                tab[#tab + 1] = '(for ((lua.arg lua.varargs)) (set! lua.nth (+ 1 lua.nth)) (lua.setindex! lua.table lua.nth lua.arg))'
             elseif field.type == 'fieldnth' then
-                tab[#tab + 1] = '(set! lua.nth (+ 1 lua.nth)) (lua.setindex! lua.table lua.nth (lua.car '
+                tab[#tab + 1] = '(for ((lua.arg '
                 tab[#tab + 1] = syntaxstr(field[1], vars)
-                tab[#tab + 1] = '))'
+                tab[#tab + 1] = ')) (set! lua.nth (+ 1 lua.nth)) (lua.setindex! lua.table lua.nth lua.arg))'
             elseif field.type == 'fieldvalue' then
                 tab[#tab + 1] = '(lua.setindex! lua.table (lua.car '
                 tab[#tab + 1] = syntaxstr(field[1], vars)
@@ -684,9 +682,12 @@ local function syntaxstr(ast, vars)
             tab[#tab + 1] = ' '
             tab[#tab + 1] = syntaxstr(ast[i], vars)
         end
-        tab[#tab + 1] = ' (return lua.nil1)))))'
+        tab[#tab + 1] = ' (return (list))))))'
         return table.concat(tab)
     elseif ast.type == 'begin' then
+        if #ast == 0 then
+            return 'lua.nil1'
+        end
         local ls = {}
         vars[#vars + 1] = ls
         local tab = {}
@@ -697,7 +698,7 @@ local function syntaxstr(ast, vars)
         vars[#vars] = nil
         local done = {}
         local defs = {}
-        defs[#defs + 1] = '(let ((lua.tmp lua.nil) '
+        defs[#defs + 1] = '(let ('
         for i=1, #ls do
             local ent = ls[i]
             if done[ent] ~= true then
@@ -709,7 +710,7 @@ local function syntaxstr(ast, vars)
         end
         defs[#defs + 1] = ')'
         defs[#defs + 1] = table.concat(tab)
-        defs[#defs + 1] = ' lua.tmp)'
+        defs[#defs + 1] = ')'
         return table.concat(defs)
     elseif ast.type == 'postfix' then
         return syntaxstr(unpostfix(ast), vars)
@@ -852,8 +853,7 @@ local function syntaxstr(ast, vars)
         return table.concat(tab)
     elseif ast.type == 'lambda' then
         local tab = {}
-        tab[#tab + 1] = '(lua.list '
-        tab[#tab + 1] = '(lambda '
+        tab[#tab + 1] = '(lua.list (lambda '
         local incs = {}
         if #ast[1] == 1 and ast[1][1].type == 'varargs' then
             tab[#tab + 1] = 'lua.varargs'
@@ -876,11 +876,11 @@ local function syntaxstr(ast, vars)
             end
             tab[#tab + 1] = ')'
         end
-        tab[#tab + 1] = '(let/cc return'
+        tab[#tab + 1] = ' (let/cc return'
         vars[#vars + 1] = incs
         tab[#tab + 1] = syntaxstr(ast[2], vars)
         vars[#vars] = nil
-        tab[#tab + 1] = ')))'
+        tab[#tab + 1] = '(return (lua.list)))))'
         return table.concat(tab)
     elseif ast.type == 'return' then
         local tab = {}
