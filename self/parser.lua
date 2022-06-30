@@ -589,19 +589,19 @@ local function syntaxstr(ast, vars)
         return syntaxstr(ast[1], vars)
     elseif ast.type == 'or' then
         local tab = {}
-        tab[#tab + 1] = '(lua.or (lua.car '
+        tab[#tab + 1] = '(let ((lua.lhs (lua.car '
         tab[#tab + 1] = syntaxstr(ast[1], vars)
-        tab[#tab + 1] = ') (lua.car '
+        tab[#tab + 1] = '))) (if (lua.toboolean lua.lhs) lua.lhs (lua.car '
         tab[#tab + 1] = syntaxstr(ast[2], vars)
-        tab[#tab + 1] = '))'
+        tab[#tab + 1] = ')))'
         return table.concat(tab)
     elseif ast.type == 'and' then
         local tab = {}
-        tab[#tab + 1] = '(lua.and (lua.car '
+        tab[#tab + 1] = '(let ((lua.lhs (lua.car '
         tab[#tab + 1] = syntaxstr(ast[1], vars)
-        tab[#tab + 1] = ') (lua.car '
+        tab[#tab + 1] = '))) (if (lua.toboolean lua.lhs) (lua.car '
         tab[#tab + 1] = syntaxstr(ast[2], vars)
-        tab[#tab + 1] = '))'
+        tab[#tab + 1] = ') lua.lhs))'
         return table.concat(tab)
     elseif ast.type == 'table' then
         local tab = {}
@@ -941,7 +941,9 @@ local res = parse(lua.program, src)
 if res.ok == true then
     local str = syntaxstr(res.ast, {{"_ENV"}})
     if arg[2] == nil then
-        print('error: give another argument, (for stdout, use "-")')
+        if load then
+            print('error: give another argument, (for stdout, use "-")')
+        end
     elseif arg[2] == '-' then
         print(str)
     else

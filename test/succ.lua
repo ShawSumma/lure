@@ -1,3 +1,4 @@
+#lang lua
 
 local function id(n)
     return n

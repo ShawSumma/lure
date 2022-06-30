@@ -1,3 +1,4 @@
+#lang lua
 local t = {x = 2}
 for i=1, 10 do
     t[#t + 1] = i

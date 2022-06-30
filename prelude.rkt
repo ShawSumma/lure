@@ -1,9 +1,6 @@
 #lang racket/base
 
-(require racket/list)
 (require racket/file)
-(require racket/string)
-(require racket/format)
 
 (define lua.meta (gensym))
 (define lua.nometa (gensym))
@@ -23,6 +20,8 @@
         value))
 
 (define (lua.setindex! tab key value)
+    (cond
+        ((string? key) (string->symbol key)))
     (hash-set! tab key value))
 
 (define (lua.toboolean val)
@@ -93,9 +92,6 @@
 
 (define (lua.flat . args)
     (apply append args))
-
-;;; (define (lua.flat . args)
-;;;     (flatten args))
 
 (define (lua.call fun . args)
     (apply fun (apply lua.flat args)))
@@ -205,9 +201,9 @@
                     (cons "unpack"
                         (lambda (tab) (table->list tab)))
                     (cons "concat"
-                        (lambda (arg (sep ""))
+                        (lambda (arg)
                             (list
-                                (string-join (table->list arg) sep)))))))
+                                (apply string-append (table->list arg))))))))
         (cons "string"
             (make-hash
                 (list

@@ -1,3 +1,5 @@
+#lang lua
+
 local function fib(n)
     if n < 2 then
         return n
