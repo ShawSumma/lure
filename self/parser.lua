@@ -615,7 +615,7 @@ local function syntaxstr(ast, vars)
                 tab[#tab + 1] = syntaxstr(field[2], vars)
                 tab[#tab + 1] = '))'
             elseif field.type == 'fieldnth' then
-                tab[#tab + 1] = '(for ((lua.arg (lua.flat '
+                tab[#tab + 1] = '(for ((lua.arg (lua.tovalues '
                 tab[#tab + 1] = syntaxstr(field[1], vars)
                 tab[#tab + 1] = '))) (set! lua.nth (+ 1 lua.nth)) (lua.setindex! lua.build (lua-type-number lua.nth) lua.arg))'
             elseif field.type == 'fieldvalue' then
@@ -760,7 +760,7 @@ local function syntaxstr(ast, vars)
         local targets = ast[1]
         local exprs = ast[2]
         local tab = {}
-        tab[#tab + 1] = '(let ((lua.tmp (lua.flat'
+        tab[#tab + 1] = '(let ((lua.tmp (lua.tail'
         for i=1, #exprs do
             tab[#tab + 1] = ' '
             tab[#tab + 1] = syntaxstr(exprs[i], vars)
@@ -835,7 +835,7 @@ local function syntaxstr(ast, vars)
             tab[#tab + 1] = syntaxstr(exprs, vars)
             tab[#tab + 1] = '))'
         else
-            tab[#tab + 1] = '(let ((lua.tmp (lua.flat'
+            tab[#tab + 1] = '(let ((lua.tmp (lua.tail'
             for i=1, #exprs do
                 tab[#tab + 1] = ' '
                 tab[#tab + 1] = syntaxstr(exprs[i], vars)
@@ -856,14 +856,17 @@ local function syntaxstr(ast, vars)
         local tab = {}
         tab[#tab + 1] = '(lua-type-function (lambda '
         local incs = {}
+        local hasvar = false
         if #ast[1] == 1 and ast[1][1].type == 'varargs' then
-            tab[#tab + 1] = 'lua.varargs'
+            tab[#tab + 1] = 'args'
+            hasvar = true
         else
             tab[#tab + 1] = '('
             for i=1, #ast[1] do
                 local arg = ast[1][i]
                 if arg.type == 'varargs' then
-                    tab[#tab + 1] = '. lua.varargs'
+                    tab[#tab + 1] = '. args'
+                    hasvar = true
                 else
                     local name = arg[1]
                     incs[#incs + 1] = name
@@ -874,6 +877,9 @@ local function syntaxstr(ast, vars)
             end
             tab[#tab + 1] = ') '
         end
+        if hasvar then
+            tab[#tab+1] = '(define lua.varargs (lua.values args))'
+        end
         tab[#tab + 1] = '(define return #f) (define return.value null) '
         vars[#vars + 1] = incs
         tab[#tab + 1] = syntaxstr(ast[2], vars)
@@ -882,7 +888,7 @@ local function syntaxstr(ast, vars)
         return table.concat(tab)
     elseif ast.type == 'return' then
         local tab = {}
-        tab[#tab + 1] = '(set! return #t) (set! return.value (lua.flat'
+        tab[#tab + 1] = '(set! return #t) (set! return.value (lua.tail'
         for i=1, #ast[1] do
             tab[#tab + 1] = ' '
             tab[#tab + 1] = syntaxstr(ast[1][i], vars)
