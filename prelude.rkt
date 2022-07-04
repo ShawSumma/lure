@@ -6,7 +6,6 @@
 
 (define-generics lua.value
     (lua.value.export lua.value)
-    (lua.value.tovalues lua.value)
     (lua.value.type lua.value)
     (lua.value.tostring lua.value)
     (lua.value.tonumber lua.value)
@@ -27,7 +26,6 @@
     (lua.value.method lua.value method . args))
 
 (define lua.export lua.value.export)
-(define lua.tovalues lua.value.tovalues)
 (define lua.type lua.value.type)
 (define lua.tostring lua.value.tostring)
 (define lua.tonumber lua.value.tonumber)
@@ -41,18 +39,11 @@
 (define lua.lt lua.value.lt)
 (define lua.le lua.value.le)
 (define lua.eq lua.value.eq)
-(define lua.scall lua.value.call)
+(define lua.call lua.value.call)
 (define lua.index lua.value.index)
 (define lua.length lua.value.length)
 (define lua.setindex! lua.value.setindex!)
 (define lua.smethod lua.value.method)
-
-(define-syntax lua.call
-    (syntax-rules ()
-        ((lua.call fun)
-            (lua.scall fun))
-        ((lua.call fun args ... end)
-            (apply lua.scall fun args ... (lua.tovalues end)))))
 
 (define-syntax lua.method
     (syntax-rules ()
@@ -61,12 +52,23 @@
         ((lua.method fun meth args ... end)
             (apply lua.smethod fun args ... (lua.tovalues end)))))
 
+(define (lua.tovalues val)
+    (if (lua.values? val)
+        (lua.values-values val)
+        (list val)))
+
+(define (lua.car val)
+    (maybe-car (lua.tovalues val)))
+
+(define (lua.cdr val)
+    (lua.values (maybe-cdr (lua.tovalues val))))
+
 (define (lua.gt lhs rhs)
     (lua.value.lt rhs lhs))
 (define (lua.ge lhs rhs)
     (lua.value.le rhs lhs))
 (define (lua.ne lhs rhs)
-    (lua-type-boolean (not (lua-type-boolean-value (lua.value.eq lhs rhs)))))
+    (lua-type-boolean (not (lua.export (lua.value.eq lhs rhs)))))
 
 (struct lua-type-nil ()
     #:sealed #:authentic
@@ -116,24 +118,24 @@
         (define (lua.value.concat val rhs)
             (lua-type-string
                 (string-append
-                    (lua-type-string-value (lua.tostring val))
-                    (lua-type-string-value (lua.tostring rhs)))))
+                    (lua.export (lua.tostring val))
+                    (lua.export (lua.tostring rhs)))))
         (define (lua.value.add val rhs)
-            (lua-type-number (+ (lua-type-number-value val) (lua-type-number-value (lua.tonumber rhs)))))
+            (lua-type-number (+ (lua-type-number-value val) (lua.export (lua.tonumber rhs)))))
         (define (lua.value.sub val rhs)
-            (lua-type-number (- (lua-type-number-value val) (lua-type-number-value (lua.tonumber rhs)))))
+            (lua-type-number (- (lua-type-number-value val) (lua.export (lua.tonumber rhs)))))
         (define (lua.value.mul val rhs)
-            (lua-type-number (* (lua-type-number-value val) (lua-type-number-value (lua.tonumber rhs)))))
+            (lua-type-number (* (lua-type-number-value val) (lua.export (lua.tonumber rhs)))))
         (define (lua.value.div val rhs)
-            (lua-type-number (/ (lua-type-number-value val) (lua-type-number-value (lua.tonumber rhs)))))
+            (lua-type-number (/ (lua-type-number-value val) (lua.export (lua.tonumber rhs)))))
         (define (lua.value.mod val rhs)
-            (lua-type-number (modulo (lua-type-number-value val) (lua-type-number-value (lua.tonumber rhs)))))
+            (lua-type-number (modulo (lua-type-number-value val) (lua.export (lua.tonumber rhs)))))
         (define (lua.value.lt val rhs)
-            (lua-type-boolean (< (lua-type-number-value val) (lua-type-number-value (lua.tonumber rhs)))))
+            (lua-type-boolean (< (lua-type-number-value val) (lua.export (lua.tonumber rhs)))))
         (define (lua.value.le val rhs)
-            (lua-type-boolean (<= (lua-type-number-value val) (lua-type-number-value (lua.tonumber rhs)))))
+            (lua-type-boolean (<= (lua-type-number-value val) (lua.export (lua.tonumber rhs)))))
         (define (lua.value.eq val rhs)
-            (lua-type-boolean (= (lua-type-number-value val) (lua-type-number-value (lua.tonumber rhs)))))
+            (lua-type-boolean (= (lua-type-number-value val) (lua.export (lua.tonumber rhs)))))
         (define (lua.value.true? val)
             #t)
         (define (lua.value.method val method . args)
@@ -151,7 +153,7 @@
             (lua-type-string
                 (string-append
                     (lua-type-string-value val)
-                    (lua-type-string-value (lua.tostring rhs)))))
+                    (lua.export (lua.tostring rhs)))))
         (define (lua.value.tostring val)
             val)
         (define (lua.value.tonumber val)
@@ -177,8 +179,8 @@
                 (hash-set! (lua-type-table-value val) (lua.export key) value)
                 (lua.call meta val key value)))
         (define (lua.value.index val key)
-            (define ret (hash-ref (lua-type-table-value val) (lua.export key) 'not-found))
-            (if (eq? ret 'not-found)
+            (define ret (hash-ref (lua-type-table-value val) (lua.export key) lua.nil))
+            (if (lua-type-nil? ret)
                 (let ((meta (lua-get-meta val "__index")))
                     (if (lua-type-nil? meta)
                         lua.nil
@@ -191,7 +193,7 @@
         (define (lua.value.eq val other)
             (lua-type-boolean (eq? val other)))
         (define (lua.value.method val method . args)
-            (apply lua.scall (lua.index val method) args))))
+            (apply lua.call (lua.index val method) args))))
 (struct lua-type-function (value)
     #:sealed #:authentic
     #:methods gen:lua.value (
@@ -209,17 +211,20 @@
             (apply (lua-type-function-value val) args))))
 
 (define (maybe-car v)
-    (if (null? v)
-        lua.nil
-        (car v)))
+    (if (pair? v)
+        (car v)
+        lua.nil))
+
+(define (maybe-cdr v)
+    (if (pair? v)
+        (cdr v)
+        (list)))
 
 (struct lua.values (values)
     #:sealed #:authentic
     #:methods gen:lua.value (
         (define (lua.value.export vals)
             (lua.export (maybe-car (lua.values-values vals))))
-        (define (lua.value.tovalues vals)
-            (lua.values-values vals))
         (define (lua.value.type vals)
             (lua.type (maybe-car (lua.values-values vals))))
         (define (lua.value.tostring vals)
@@ -247,7 +252,7 @@
         (define (lua.value.eq vals rhs)
             (lua.eq (maybe-car (lua.values-values vals)) rhs))
         (define (lua.value.call vals . args)
-            (apply lua.scall (maybe-car (lua.values-values vals)) args))
+            (apply lua.call (maybe-car (lua.values-values vals)) args))
         (define (lua.value.index vals key)
             (lua.index (maybe-car (lua.values-values vals)) key))
         (define (lua.value.length vals)
@@ -257,21 +262,11 @@
         (define (lua.value.method vals method . args)
             (apply lua.smethod (maybe-car (lua.values-values vals)) args))))
 
-(define-syntax lua.car
-    (syntax-rules ()
-        ((lua.car v) v)))
-
 (define-syntax lua.tail
     (syntax-rules ()
         ((lua.tail end) end)
         ((lua.tail args ... end)
             (lua.values (apply list args ... (lua.tovalues end))))))
-
-(define (lua.cdr val)
-    (define rest (lua.tovalues val))
-    (if (null? rest)
-        (lua.values rest)
-        (lua.values (cdr rest))))
 
 (define (lua-get-meta tab name)
     (if (lua-type-table? tab)
@@ -333,7 +328,7 @@
                         (display #\tab)
                         (set! first #t))
                     (display
-                        (lua-type-string-value (lua.tostring arg))))
+                        (lua.export (lua.tostring arg))))
                 (newline)
                 (lua.values (list)))))
         (cons "table"
@@ -345,35 +340,36 @@
                     (cons "concat"
                         (lua-type-function (lambda (arg . nils)
                             (lua-type-string (apply string-append
-                                (map lua-type-string-value (table->list arg))))))))))
+                                (map lua.export (table->list arg))))))))))
         (cons "string"
             (lua.table
                 (list
                     (cons "byte"
                         (lua-type-function (lambda (str . nils)
-                            (lua-type-number (char->integer (car (string->list (lua-type-string-value (lua.tostring str)))))))))
+                            (lua-type-number (char->integer (car (string->list (lua.export (lua.tostring str)))))))))
                     (cons "sub"
                         (lua-type-function (lambda (str start (end lua.nil) . nils)
                             (set! start (lua.tonumber start))
                             (set! end (lua.tonumber end))
+                            (set! str (lua.export (lua.tostring str)))
                             (lua-type-string
-                                (substring (lua-type-string-value (lua.tostring str))
-                                    (- (lua-type-number-value start) 1)
+                                (substring str
+                                    (- (lua.export start) 1)
                                     (if (lua-type-nil? end)
                                         (string-length str)
-                                        (lua-type-number-value end)))))))
+                                        (lua.export end)))))))
                     (cons "len"
                         (lua-type-function (lambda (str . nils)
-                            (lua-type-number (string-length (lua-type-string-value (lua.tostring str))))))))))
+                            (lua-type-number (string-length (lua.export (lua.tostring str))))))))))
         (cons "io"
             (lua.table
                 (list
                     (cons "dump"
                         (lua-type-function (lambda (filename data . nils)
-                            (display-to-file (lua-type-string-value (lua.tostring data)) (lua-type-string-value filename) #:exists 'replace)
+                            (display-to-file (lua.export (lua.tostring data)) (lua.export filename) #:exists 'replace)
                             (lua.values (list)))))
                     (cons "slurp"
                         (lua-type-function (lambda (name . nils)
-                            (lua-type-string (file->string (lua-type-string-value name))))))))))))
+                            (lua-type-string (file->string (lua.export name))))))))))))
 (lua.setindex! _ENV (lua-type-string "_G") _ENV)
 (define local-_ENV _ENV)

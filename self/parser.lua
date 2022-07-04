@@ -581,27 +581,27 @@ local function syntaxstr(ast, vars)
         end
     elseif ast.type == 'not' then
         local tab = {}
-        tab[#tab + 1] = '(lua-type-boolean (not (lua.true? (lua.car '
+        tab[#tab + 1] = '(lua-type-boolean (not (lua.true? '
         tab[#tab + 1] = syntaxstr(ast[1], vars)
-        tab[#tab + 1] = '))))'
+        tab[#tab + 1] = ')))'
         return table.concat(tab)
     elseif ast.type == 'string' then
         return syntaxstr(ast[1], vars)
     elseif ast.type == 'or' then
         local tab = {}
-        tab[#tab + 1] = '(let ((lua.lhs (lua.car '
+        tab[#tab + 1] = '(let ((lua.lhs '
         tab[#tab + 1] = syntaxstr(ast[1], vars)
-        tab[#tab + 1] = '))) (if (lua.true? lua.lhs) lua.lhs (lua.car '
+        tab[#tab + 1] = ')) (if (lua.true? lua.lhs) lua.lhs '
         tab[#tab + 1] = syntaxstr(ast[2], vars)
-        tab[#tab + 1] = ')))'
+        tab[#tab + 1] = '))'
         return table.concat(tab)
     elseif ast.type == 'and' then
         local tab = {}
-        tab[#tab + 1] = '(let ((lua.lhs (lua.car '
+        tab[#tab + 1] = '(let ((lua.lhs '
         tab[#tab + 1] = syntaxstr(ast[1], vars)
-        tab[#tab + 1] = '))) (if (lua.true? lua.lhs) (lua.car '
+        tab[#tab + 1] = ')) (if (lua.true? lua.lhs) '
         tab[#tab + 1] = syntaxstr(ast[2], vars)
-        tab[#tab + 1] = ') lua.lhs))'
+        tab[#tab + 1] = ' lua.lhs))'
         return table.concat(tab)
     elseif ast.type == 'table' then
         local tab = {}
@@ -619,9 +619,9 @@ local function syntaxstr(ast, vars)
                 tab[#tab + 1] = syntaxstr(field[1], vars)
                 tab[#tab + 1] = '))) (set! lua.nth (+ 1 lua.nth)) (lua.setindex! lua.build (lua-type-number lua.nth) lua.arg))'
             elseif field.type == 'fieldvalue' then
-                tab[#tab + 1] = '(lua.setindex! lua.build (lua.car '
+                tab[#tab + 1] = '(lua.setindex! lua.build '
                 tab[#tab + 1] = syntaxstr(field[1], vars)
-                tab[#tab + 1] = ') (lua.car '
+                tab[#tab + 1] = ' (lua.car '
                 tab[#tab + 1] = syntaxstr(field[2], vars)
                 tab[#tab + 1] = '))'
             end
@@ -644,13 +644,13 @@ local function syntaxstr(ast, vars)
         tab[#tab + 1] = '(let ((break #f)) (for (#:break return (lua.iter (in-range'
         for i=2, #ast-1 do
             if i == 3 then
-                tab[#tab + 1] = '(lua-type-number-value (lua.add (lua-type-number 1) (lua.car '
+                tab[#tab + 1] = '(lua.export (lua.add (lua-type-number 1) '
                 tab[#tab + 1] = syntaxstr(ast[i], vars)
-                tab[#tab + 1] = ')))'
+                tab[#tab + 1] = '))'
             else
-                tab[#tab + 1] = '(lua-type-number-value (lua.tonumber (lua.car '
+                tab[#tab + 1] = '(lua.export (lua.tonumber '
                 tab[#tab + 1] = syntaxstr(ast[i], vars)
-                tab[#tab + 1] = ')))'
+                tab[#tab + 1] = '))'
             end
         end
         tab[#tab + 1] = '))) (set! '
@@ -662,6 +662,7 @@ local function syntaxstr(ast, vars)
     elseif ast.type == 'ident' then
         for i=1, #vars do
             local level = vars[i]
+            print(i, #vars, type(vars[i]))
             for j=1, #level do
                 if level[j] == ast[1] then
                     return mangle(ast[1])
@@ -717,9 +718,9 @@ local function syntaxstr(ast, vars)
         return syntaxstr(unpostfix(ast), vars)
     elseif ast.type == 'method' then
         local tab = {}
-        tab[#tab + 1] = '(lua.method (lua.car '
+        tab[#tab + 1] = '(lua.method '
         tab[#tab + 1] = syntaxstr(ast[1], vars)
-        tab[#tab + 1] = ') '
+        tab[#tab + 1] = ' '
         tab[#tab + 1] = syntaxstr(ast[2], vars)
         tab[#tab + 1] = ' '
         local args = ast[3]
@@ -731,41 +732,58 @@ local function syntaxstr(ast, vars)
         return table.concat(tab)
     elseif ast.type == 'call' then
         local tab = {}
-        tab[#tab + 1] = '(lua.call (lua.car '
-        tab[#tab + 1] = syntaxstr(ast[1], vars)
-        tab[#tab + 1] = ')'
-        for i=2, #ast do
-            tab[#tab + 1] = ' '
-            tab[#tab + 1] = syntaxstr(ast[i], vars)
+        if #ast == 1 then
+            tab[#tab + 1] = '(lua.call '
+            tab[#tab + 1] = syntaxstr(ast[1], vars)
+            tab[#tab + 1] = ')'
+        else
+            tab[#tab + 1] = '(apply lua.call '
+            tab[#tab + 1] = syntaxstr(ast[1], vars)
+            for i=2, #ast do
+                if i == #ast then
+                    tab[#tab + 1] = ' (lua.tovalues '
+                    tab[#tab + 1] = syntaxstr(ast[i], vars)
+                    tab[#tab + 1] = ')'
+                else
+                    tab[#tab + 1] = ' '
+                    tab[#tab + 1] = syntaxstr(ast[i], vars)
+                end
+            end
+            tab[#tab + 1] = ')'
         end
-        tab[#tab + 1] = ')'
         return table.concat(tab)
     elseif ast.type == 'dotindex' then
         local tab = {}
-        tab[#tab + 1] = '(lua.index (lua.car '
+        tab[#tab + 1] = '(lua.index '
         tab[#tab + 1] = syntaxstr(ast[1], vars)
-        tab[#tab + 1] = ') (lua-type-string "'
+        tab[#tab + 1] = ' (lua-type-string "'
         tab[#tab + 1] = ast[2][1]
         tab[#tab + 1] = '"))'
         return table.concat(tab)
     elseif ast.type == 'index' then
         local tab = {}
-        tab[#tab + 1] = '(lua.index (lua.car '
+        tab[#tab + 1] = '(lua.index '
         tab[#tab + 1] = syntaxstr(ast[1], vars)
-        tab[#tab + 1] = ') (lua.car '
+        tab[#tab + 1] = ' '
         tab[#tab + 1] = syntaxstr(ast[2], vars)
-        tab[#tab + 1] = '))'
+        tab[#tab + 1] = ')'
         return table.concat(tab)
     elseif ast.type == 'assign' then
         local targets = ast[1]
         local exprs = ast[2]
         local tab = {}
-        tab[#tab + 1] = '(let ((lua.tmp (lua.tail'
+        tab[#tab + 1] = '(let ((lua.tmp (lua.values (apply list'
         for i=1, #exprs do
-            tab[#tab + 1] = ' '
-            tab[#tab + 1] = syntaxstr(exprs[i], vars)
+            if i == #exprs then
+                tab[#tab + 1] = ' (lua.tovalues '
+                tab[#tab + 1] = syntaxstr(exprs[i], vars)
+                tab[#tab + 1] = ')'
+            else
+                tab[#tab + 1] = ' '
+                tab[#tab + 1] = syntaxstr(exprs[i], vars)
+            end
         end
-        tab[#tab + 1] = ')))'
+        tab[#tab + 1] = '))))'
         for i=1, #targets do
             local target = unpostfix(targets[i])
             if target.type == 'ident' then
@@ -783,20 +801,21 @@ local function syntaxstr(ast, vars)
                     tab[#tab + 1] = '(lua.setindex! local-_ENV (lua-type-string "' .. target[1] .. '") (lua.car lua.tmp))'
                 end
             elseif target.type == 'dotindex' then
-                tab[#tab + 1] = '(lua.setindex! (lua.car '
+                tab[#tab + 1] = '(lua.setindex! '
                 tab[#tab + 1] = syntaxstr(target[1], vars)
-                tab[#tab + 1] = ') (lua-type-string "'
+                tab[#tab + 1] = ' (lua-type-string "'
                 tab[#tab + 1] = target[2][1]
                 tab[#tab + 1] = '") (lua.car lua.tmp))'
             elseif target.type == 'index' then
-                tab[#tab + 1] = '(lua.setindex! (lua.car '
+                tab[#tab + 1] = '(lua.setindex! '
                 tab[#tab + 1] = syntaxstr(target[1], vars)
-                tab[#tab + 1] = ') (lua.car '
+                tab[#tab + 1] = ' '
                 tab[#tab + 1] = syntaxstr(target[2], vars)
-                tab[#tab + 1] = ') (lua.car lua.tmp))'
+                tab[#tab + 1] = ' (lua.car lua.tmp))'
             else
                 tab[#tab + 1] = '?assign:' .. target.type
             end
+            tab[#tab + 1] = '  (set! lua.tmp (lua.cdr lua.tmp))'
         end
         tab[#tab + 1] = '(void))'
         return table.concat(tab)
@@ -831,23 +850,29 @@ local function syntaxstr(ast, vars)
             cvar[idents[1]] = true
             tab[#tab + 1] = '(set! '
             tab[#tab + 1] = mangle(idents[1])
-            tab[#tab + 1] = ' (lua.car '
+            tab[#tab + 1] = ' '
             tab[#tab + 1] = syntaxstr(exprs, vars)
-            tab[#tab + 1] = '))'
+            tab[#tab + 1] = ')'
         else
-            tab[#tab + 1] = '(let ((lua.tmp (lua.tail'
+            tab[#tab + 1] = '(let ((lua.tmp (lua.values (apply list'
             for i=1, #exprs do
-                tab[#tab + 1] = ' '
-                tab[#tab + 1] = syntaxstr(exprs[i], vars)
+                if i == #exprs then
+                    tab[#tab + 1] = ' (lua.tovalues '
+                    tab[#tab + 1] = syntaxstr(exprs[i], vars)
+                    tab[#tab + 1] = ')'
+                else
+                    tab[#tab + 1] = ' '
+                    tab[#tab + 1] = syntaxstr(exprs[i], vars)
+                end
             end
-            tab[#tab + 1] = ')))'
+            tab[#tab + 1] = '))))'
             for i=1, #idents do
                 local name = idents[i][1]
                 cvar[#cvar + 1] = name
                 cvar[name] = true
                 tab[#tab + 1] = '(set! '
                 tab[#tab + 1] = mangle(name)
-                tab[#tab + 1] = ' (lua.car lua.tmp)) (set! lua.tmp (lua.cdr lua.tmp))'
+            tab[#tab + 1] = ' (lua.car lua.tmp)) (set! lua.tmp (lua.cdr lua.tmp))'
             end
             tab[#tab + 1] = ')'
         end
@@ -903,9 +928,9 @@ local function syntaxstr(ast, vars)
         return table.concat(tab)
     elseif ast.type == 'case' then
         local tab = {}
-        tab[#tab + 1] = '((lua.true? (lua.car '
+        tab[#tab + 1] = '((lua.true? '
         tab[#tab + 1] = syntaxstr(ast[1], vars)
-        tab[#tab + 1] = ')) '
+        tab[#tab + 1] = ') '
         tab[#tab + 1] = syntaxstr(ast[2], vars)
         tab[#tab + 1] = ')'
         return table.concat(tab)
@@ -919,9 +944,9 @@ local function syntaxstr(ast, vars)
         return table.concat(tab)
     elseif ast.type == 'length' then
         local tab = {}
-        tab[#tab + 1] = '(lua.length (lua.car '
+        tab[#tab + 1] = '(lua.length '
         tab[#tab + 1] = syntaxstr(ast[1], vars)
-        tab[#tab + 1] = '))'
+        tab[#tab + 1] = ')'
         return table.concat(tab)
     elseif ast.type == 'varargs' then
         return 'lua.varargs'
@@ -929,11 +954,11 @@ local function syntaxstr(ast, vars)
         local tab = {}
         tab[#tab + 1] = '('
         tab[#tab + 1] = ops[ast.type]
-        tab[#tab + 1] = ' (lua.car '
+        tab[#tab + 1] = ' '
         tab[#tab + 1] = syntaxstr(ast[1], vars)
-        tab[#tab + 1] = ') (lua.car '
+        tab[#tab + 1] = ' '
         tab[#tab + 1] = syntaxstr(ast[2], vars)
-        tab[#tab + 1] = '))'
+        tab[#tab + 1] = ')'
         return table.concat(tab)
     else
         return '?' .. ast.type
