@@ -1,3 +1,7 @@
 #lang lua
 
-print(#{1, 2, 3})
+local function id()
+    return 1
+end
+
+print(id(), 1)
