@@ -33,7 +33,8 @@ local function call(fun, ...)
 end
 
 local function listexpr(...)
-    return call('list', ...)
+    local tab = {...}
+    return last.call('list', tab)
 end
 
 local function letexpr(iexpr, vexpr, rexpr)
@@ -41,18 +42,40 @@ local function letexpr(iexpr, vexpr, rexpr)
 end
 
 local function maybecar(ast)
-    local val = tmp('list')
-    local check = ifexpr(call('pair?', val), call('car', val), ifexpr(call('null?', val), last.literal(nil), val))
-    return letexpr(val, ast, check)
+    if ast.type == 'call' and ast.fun == 'list' then
+        return ast.args[1]
+    elseif ast.type == 'symbol' then
+        return ast
+    else
+        local val = tmp('list')
+        local check = ifexpr(call('pair?', val), call('car', val), ifexpr(call('null?', val), last.literal(nil), val))
+        return letexpr(val, ast, check)
+    end
 end
 
 local function callexpr(fun, ...)
-    return call('apply', fun, ...)
+    local args = {fun, ...}
+    local final = args[#args]
+    if #args ~= 1 and final.type == 'call' and final.fun == 'list' then
+        args[#args] = nil
+        for i=1, #final.args do
+            args[#args+1] = final.args[i]
+        end
+        return last.call('call', args)
+    else
+        return last.call('apply', args)
+    end
 end
 
 local function forcelist(ast)
-    local val = tmp('val')
-    return letexpr(val, ast, ifexpr(call('list?', val), val, call('list', val)))
+    if ast.type == 'call' and ast.fun == 'list' then
+        return ast
+    elseif ast.type == 'symbol' then
+        return call('list', ast)
+    else
+        local val = tmp('val')
+        return letexpr(val, ast, ifexpr(call('list?', val), val, call('list', val)))
+    end
 end
 
 local function numexpr(tmpv)
@@ -101,17 +124,47 @@ local binary = {
 }
 
 local function indexexpr(lhs, rhs)
-    local lhsv = tmp('lhs')
-    local rhsv = tmp('rhs')
+    local lhsv 
+    local rhsv 
+    local letl = lhs.type ~= 'literal' and lhs.type ~= 'symbol'
+    local letr = lhs.type ~= 'literal' and lhs.type ~= 'symbol'
+    if letl then
+        lhsv = tmp('lhs')
+    else
+        lhsv = lhs
+    end
+    if letr then
+        rhsv = tmp('rhs')
+    else
+        rhsv = rhs
+    end
     local tmpv = tmp('meta')
     local meta = letexpr(tmpv, call('hash-ref', lhsv, last.literal('__index'), last.literal(nil)), ifexpr(call('void?', tmpv), last.literal(nil), callexpr(tmpv, lhsv, forcelist(rhsv))))
     local found = letexpr(tmpv, call('hash-ref', lhsv, rhsv), ifexpr(call('void?', tmpv), meta, tmpv))
-    return letexpr(lhsv, lhs, letexpr(rhsv, rhs, found))
+    if letr then
+        found = letexpr(rhsv, rhs, found)
+    end
+    if letl then
+        found = letexpr(lhsv, lhs, found)
+    end
+    return found
 end
 
 local function metabinary(op, lhs, rhs)
-    local lhsv = tmp('lhs')
-    local rhsv = tmp('rhs')
+    local lhsv 
+    local rhsv 
+    local letl = lhs.type ~= 'literal' and lhs.type ~= 'symbol'
+    local letr = lhs.type ~= 'literal' and lhs.type ~= 'symbol'
+    if letl then
+        lhsv = tmp('lhs')
+    else
+        lhsv = lhs
+    end
+    if letr then
+        rhsv = tmp('rhs')
+    else
+        rhsv = rhs
+    end
     local function simplebinary(mt, op)
         return ifexpr(
             call('number?', lhsv),
@@ -137,7 +190,13 @@ local function metabinary(op, lhs, rhs)
     else
         error("bad op: " .. op)
     end
-    return letexpr(lhsv, lhs, letexpr(rhsv, rhs, value))
+    if letr then
+        value = letexpr(rhsv, rhs, value)
+    end
+    if letl then
+        value = letexpr(lhsv, lhs, value)
+    end
+    return value
 end
 
 function expr.newenv()
@@ -248,6 +307,8 @@ function expr.conv(state, ast)
         end
         local body = expr.conv(state, ast[2])
         state.scopes[#state.scopes] = nil
+        args[#args+1] = last.symbol('.')
+        args[#args+1] = last.symbol('args')
         return listexpr(call('lambda', last.call('call', args), body))
     elseif ast.type == 'cond' then
         local args = {}
