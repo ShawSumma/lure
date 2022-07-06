@@ -7,6 +7,7 @@ local src = files.slurp(arg[1])
 local res = parse(src)
 if res.ok == true then
     local res = expr.program(res.ast)
+    print('#lang racket/base')
     print(res)
 else
     print(res.msg)

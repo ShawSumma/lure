@@ -38,7 +38,17 @@ local apply = {
 
 local literal = {
     __tostring = function(self)
-        return tostring(self.value)
+        if self.value == nil then
+            return '(void)'
+        elseif self.value == true then
+            return '#t'
+        elseif self.value == false then
+            return '#f'
+        elseif type(self.value) == 'number' then
+            return tostring(self.value)
+        elseif type(self.value) == 'string' then
+            return '"' .. self.value .. '"'
+        end
     end
 }
 
