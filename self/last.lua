@@ -21,6 +21,21 @@ local call = {
     end
 }
 
+local apply = {
+    __tostring = function(self)
+        local tab = {}
+        tab[#tab+1] = '('
+        for i=1, #self.args do
+            if i ~= 1 then
+                tab[#tab+1] = ' '
+            end
+            tab[#tab+1] = tostring(self.args[i])
+        end
+        tab[#tab+1] = ')'
+        return table.concat(tab)
+    end
+}
+
 local literal = {
     __tostring = function(self)
         return tostring(self.value)
@@ -32,7 +47,11 @@ function last.symbol(name)
 end
 
 function last.call(fun, args)
-    return setmetatable({type='call', fun=fun, args=args}, call)
+    if fun == 'call' then
+        return setmetatable({type='call', fun=fun, args=args}, apply)
+    else
+        return setmetatable({type='call', fun=fun, args=args}, call)
+    end
 end
 
 function last.literal(value)
