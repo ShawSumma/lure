@@ -1,3 +1,4 @@
+#lang lua
 
 local function dump(name, data)
     local val = assert(io.open(name, "w"))

@@ -1,8 +1,12 @@
+#lang lua
 
 local types = {}
 
 local typemeta = {
     __index = typemethods,
+    __eq = function(self, other)
+        return types.issame(self, other)
+    end,
     __tostring = function(self)
         if self.type == 'dummy' then
             return 'any'
@@ -32,6 +36,17 @@ local typemeta = {
             return "nil"
         elseif self.type == 'ref' then
             return "?" .. tostring(self.id)
+        elseif self.type == 'union' then
+            local tab = {}
+            tab[#tab+1] = '('
+            for i=1, #self.opts do
+                if i ~= 1 then
+                    tab[#tab+1] = ' | '
+                end
+                tab[#tab+1] = tostring(self.opts[i])
+            end
+            tab[#tab+1] = ')'
+            return table.concat(tab)
         elseif self.type == 'function' then
             local tab = {}
             tab[#tab+1] = '('
@@ -131,9 +146,6 @@ function types.assign(lhs, rhs)
             return types.lambda(ret, args)
         end
     end
-    -- if rhs.type == 'string' then
-    --     return types.union(lhs, rhs)
-    -- end
     return types.union(lhs, rhs)
 end
 
@@ -187,7 +199,7 @@ end
 
 local function iscollect(node)
     local t = node.type
-    return t == 'program' or t == 'block' or t == 'case' or t == 'cond' or t == 'else' or t == 'return' or t == 'to' or t == 'from'
+    return t == 'program' or t == 'block' or t == 'case' or t == 'cond' or t == 'else' or t == 'return' or t == 'to' or t == 'from' or t == 'while' or t == 'forin' or t == 'assign'
 end
 
 local function ismath(node)
@@ -202,7 +214,7 @@ end
 
 local function isexpr(node)
     local t = node.type
-    return ismath(node) or iscmp(node) or t == 'index' or t == 'call'
+    return ismath(node) or iscmp(node) or t == 'index' or t == 'dotindex' or t == 'call'
 end
 
 function check.dummy(state, node)
@@ -239,6 +251,16 @@ function check.dummy(state, node)
             end
         end
         return check.dummy(state, {type='index', {type='ident', '_ENV'}, {type='string', node[1]}})
+    elseif node.type == 'for' then
+        for i=1, #node-1 do
+            node[i] = check.dummy(state, node[i])
+        end
+        local id = check.id(state)
+        node[1][1].id = id
+        state.locals[#state.locals][node[1][1]] = id
+        state.types[id] = types.dummy()
+        node[#node] = check.dummy(state, node[#node])
+        return node
     elseif node.type == 'local' then
         local names = node[1]
         local values = node[2]
@@ -247,10 +269,8 @@ function check.dummy(state, node)
             names.id = id
             state.locals[#state.locals][names[1]] = id
             state.types[id] = types.dummy()
-            node[1] = {type='to', names}
-            node[2] = {type='from', check.dummy(state, node[2])}
             names = {}
-            values = {}
+            values = {values}
         end
         for i=1, #values do
             values[i] = check.dummy(state, values[i])
@@ -264,12 +284,12 @@ function check.dummy(state, node)
         return node
     elseif node.type == 'lambda' then
         local names = node[1]
-        local locals = {}
+        local vals = {}
         local args = {}
         for i=1, #names do
             local id = check.id(state)
             names[i].id = id
-            locals[names[i][1]] = id
+            vals[names[i][1]] = id
             local ty = types.dummy()
             state.types[id] = ty
             args[#args+1] = ty
@@ -278,9 +298,9 @@ function check.dummy(state, node)
         local id = check.id(state)
         node.id = id
         state.types[id] = types.lambda(types.dummy(), args)
-        state.locals[ind] = locals
+        state.locals[ind] = vals
         node[2] = check.dummy(state, node[2])
-        state.locals[ind] = nilfrom
+        state.locals[ind] = nil
         return node
     elseif isexpr(node) then
         local id = check.id(state)
@@ -330,6 +350,21 @@ function check.print(state, node, ind)
     end
 end
 
+function check.type(state, node)
+    if type(node) == 'table' then
+        if node.id ~= nil then
+            node.datatype = state.types[node.id]
+            node.id = nil
+        end
+        if node.datatype == nil then
+            node.datatype = types.dummy()
+        end
+        for i=1, #node do
+            check.type(state, node[i])
+        end
+    end
+end
+
 function check.more(state, node)
     if type(node) ~= 'table' then
         return
@@ -340,9 +375,17 @@ function check.more(state, node)
     for i=1, #node do
         check.more(state, node[i])
     end
-    if node.type == 'local' then
+    if node.type == 'for' then
         local to = node[1]
         local from = node[2]
+        state.types[to.id] = types.assign(state.types[to.id], state.types[from.id])
+    elseif node.type == 'local' or node.type == 'assign' then
+        local to = node[1]
+        local from = node[2]
+        if to.type == 'ident' then
+            to = {to}
+            from = {from}
+        end
         if #to >= #from then
             for i=1, #from do
                 state.types[to[i].id] = types.assign(state.types[to[i].id], state.types[from[i].id])
@@ -395,6 +438,7 @@ return function(ast)
     for i=1, 16 do
         check.more(state, ast)
     end
-    check.print(state, ast)
+    check.type(state, ast)
+    -- check.print(state, ast)
     -- print(ast)
 end

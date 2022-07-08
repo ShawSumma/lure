@@ -1,3 +1,4 @@
+#lang lua
 
 local last = {}
 
