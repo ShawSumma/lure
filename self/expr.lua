@@ -70,7 +70,7 @@ end
 local function forcelist(ast)
     if ast.type == 'call' and ast.fun == 'list' then
         return ast
-    elseif ast.type == 'symbol' then
+    elseif ast.type == 'symbol' or ast.type == 'literal' then
         return call('list', ast)
     else
         local val = tmp('val')
