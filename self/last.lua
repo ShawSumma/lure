@@ -46,7 +46,7 @@ local literal = {
         elseif self.value == false then
             return '#f'
         elseif type(self.value) == 'number' then
-            return tostring(self.value)
+            return '#i' .. tostring(self.value)
         elseif type(self.value) == 'string' then
             return '"' .. self.value .. '"'
         end

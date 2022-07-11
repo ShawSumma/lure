@@ -12,4 +12,4 @@ local function tak(x, y, z)
     end
 end
 
-print(tak(12, 0, 12))
+print(tak(13, 12, 26))

@@ -10,7 +10,7 @@ local res = parse(src)
 if res.ok == true then
     typecheck(res.ast)
     local res = expr.program(res.ast)
-    files.dump(arg[2], '#lang racket/base\n' .. tostring(res))
+    files.dump(arg[2], '#lang racket/base\n(require racket/flonum)\n' .. tostring(res))
 else
     print(res.msg)
 end

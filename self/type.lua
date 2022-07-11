@@ -3,7 +3,6 @@
 local types = {}
 
 local typemeta = {
-    __index = typemethods,
     __eq = function(self, other)
         return types.issame(self, other)
     end,
@@ -199,7 +198,7 @@ end
 
 local function iscollect(node)
     local t = node.type
-    return t == 'program' or t == 'block' or t == 'case' or t == 'cond' or t == 'else' or t == 'return' or t == 'to' or t == 'from' or t == 'while' or t == 'forin' or t == 'assign'
+    return t == 'program' or t == 'block' or t == 'case' or t == 'cond' or t == 'else' or t == 'return' or t == 'to' or t == 'from' or t == 'while' or t == 'forin' or t == 'assign' or t == 'break'
 end
 
 local function ismath(node)
@@ -252,11 +251,11 @@ function check.dummy(state, node)
         end
         return check.dummy(state, {type='index', {type='ident', '_ENV'}, {type='string', node[1]}})
     elseif node.type == 'for' then
-        for i=1, #node-1 do
+        for i=2, #node-1 do
             node[i] = check.dummy(state, node[i])
         end
         local id = check.id(state)
-        node[1][1].id = id
+        node[1].id = id
         state.locals[#state.locals][node[1][1]] = id
         state.types[id] = types.dummy()
         node[#node] = check.dummy(state, node[#node])
@@ -264,6 +263,9 @@ function check.dummy(state, node)
     elseif node.type == 'local' then
         local names = node[1]
         local values = node[2]
+        if values == nil then
+            return
+        end
         if names.type == 'ident' then
             local id = check.id(state)
             names.id = id
@@ -438,7 +440,7 @@ return function(ast)
     for i=1, 16 do
         check.more(state, ast)
     end
-    check.type(state, ast)
     -- check.print(state, ast)
+    check.type(state, ast)
     -- print(ast)
 end

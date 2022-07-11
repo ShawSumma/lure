@@ -25,12 +25,13 @@ local function mangle(ident)
     return last.symbol('local-' .. firstrec(ident))
 end
 
-local function ifexpr(cond, ift, iff)
-    return last.call('if', {cond, ift, iff})
-end
-
 local function call(fun, ...)
     return last.call(fun, {...})
+end
+
+local function ifexpr(cond, ift, iff)
+    iff = iff or call('void')
+    return last.call('if', {cond, ift, iff})
 end
 
 local function listexpr(...)
@@ -190,12 +191,28 @@ local function metabinary(op, lhs, rhs)
         )
     end
     local value = nil
-    if op == '<' then
-        value = simplebinary('__lt', '<')
-    elseif op == '+' then
+    if op == '+' then
         value = simplebinary('__add', '+')
     elseif op == '-' then
         value = simplebinary('__sub', '-')
+    elseif op == '*' then
+        value = simplebinary('__sub', '*')
+    elseif op == '/' then
+        value = simplebinary('__sub', '/')
+    elseif op == '%' then
+        value = simplebinary('__sub', 'modulo')
+    elseif op == '==' then
+        value = simplebinary('__eq', 'equal?')
+    elseif op == '<' then
+        value = simplebinary('__lt', '<')
+    elseif op == '<=' then
+        value = simplebinary('__le', '<=')
+    elseif op == '~=' then
+        value = call('not', simplebinary('__eq', 'equal?'))
+    elseif op == '>' then
+        value = call('not', simplebinary('__le', '<='))
+    elseif op == '>=' then
+        value = call('not', simplebinary('__lt', '<'))
     else
         error("bad op: " .. op)
     end
@@ -263,16 +280,23 @@ function expr.conv(state, ast)
         for i=1, #ast do
             args[#args + 1] = expr.conv(state, ast[i])
         end
-        return letexpr(mangle('_ENV'), loadenv(), last.call('begin', args))
+        local body = last.call('begin', args)
+        body = letexpr(last.symbol('break'), last.literal(false), body)
+        body = letexpr(last.symbol('return'), last.literal(nil), call('begin', body, last.symbol('return')))
+        return letexpr(mangle('_ENV'), loadenv(), body)
     elseif ast.type == 'block' then
         local scope = {}
         state.scopes[#state.scopes+1] = scope
-        local args = {}
+        local ret = nil
         for i=1, #ast do
-            args[#args+1] = expr.conv(state, ast[i])
+            local val = ifexpr(last.symbol('break'), last.symbol('return'), expr.conv(state, ast[i]))
+            if ret then
+                ret = call('begin', ret, val)
+            else
+                ret = val
+            end
         end
         state.scopes[#state.scopes] = nil
-        local ret = beginexpr(args)
         local xdone = {}
         for i=1, #scope do
             local name = scope[i]
@@ -284,6 +308,40 @@ function expr.conv(state, ast)
             end
         end
         return ret
+    elseif ast.type == 'for' then
+        local scope = state.scopes[#state.scopes]
+        scope[#scope+1] = ast[1][1]
+        if ast[2].datatype.type == 'number' and ast[3].datatype.type == 'number' then
+            local args = {}
+            for i=2, #ast-1 do
+                args[#args+1] = maybecar(expr.conv(state, ast[i]))
+            end
+            local loopv = call('for', call('call', last.symbol('#:break'), last.symbol('break'), call('call', mangle(ast[1][1]), last.call('in-inclusive-range', args))), expr.conv(state, ast[#ast]))
+            loopv = letexpr(last.symbol('restore'), last.literal(false), call('begin', loopv, ifexpr(last.symbol('restore'), call('set!', last.symbol('break'), last.literal(false)))))
+            return loopv
+        end
+        assert(false, 'bad for')
+    elseif ast.type == 'assign' then
+        local names = ast[1]
+        local values = ast[2]
+        local scope = state.scopes[#state.scopes]
+        if names.type == 'ident' then
+            scope[#scope+1] = firstrec(names[1])
+            names = {names}
+            values = {values}
+        end
+        local args = {}
+        for i=1, #values-1 do
+            if names[i] then
+                args[#args+1] = call('set!', mangle(names[i]), maybecar(expr.conv(state, values[i])))
+            end
+        end
+        if #values == #names then
+            args[#args+1] = call('set!', mangle(names[#names]), maybecar(expr.conv(state, values[#values])))
+        else
+            error("bad set")
+        end
+        return last.call('begin', args)
     elseif ast.type == 'local' then
         local names = ast[1]
         local values = ast[2]
@@ -296,18 +354,20 @@ function expr.conv(state, ast)
         local args = {}
         for i=1, #values-1 do
             if names[i] then
-                args[#args+1] = call('set!', mangle(names[i]), maybecar(expr.conv(values[i])))
+                args[#args+1] = call('set!', mangle(names[i]), maybecar(expr.conv(state, values[i])))
             end
         end
         if #values == #names then
             args[#args+1] = call('set!', mangle(names[#names]), maybecar(expr.conv(state, values[#values])))
         else
-            error("bad")
+            error("bad local assign")
         end
         for i=1, #names do
             scope[#scope+1] = firstrec(names[i])
         end
         return last.call('begin', args)
+    elseif ast.type == 'break' then
+        return call('begin', call('set!', last.symbol('break'), last.literal(true)), call('set!', last.symbol('restore'), last.literal(true)))
     elseif ast.type == 'lambda' then
         if ast.datatype.type == 'function' then
             local scope = {}
@@ -319,6 +379,8 @@ function expr.conv(state, ast)
             end
             local body = expr.conv(state, ast[2])
             state.scopes[#state.scopes] = nil
+            body = letexpr(last.symbol('break'), last.literal(false), body)
+            body = letexpr(last.symbol('return'), last.literal(nil), call('begin', body, last.symbol('return')))
             return listexpr(call('lambda', last.call('call', args), body))
         else
             local scope = {}
@@ -346,15 +408,16 @@ function expr.conv(state, ast)
         return call('else', expr.conv(state, ast[1]))
     elseif ast.type == 'return' then
         local args = ast[1]
+        local res
         if #args == 1 then
-            return maybecar(expr.conv(state, args[1]))
+            res = maybecar(expr.conv(state, args[1]))
         else
-            local res = forcelist(expr.conv(state, args[#ast]))
+            res = forcelist(expr.conv(state, args[#ast]))
             for i=#args-1, 1, -1 do
                 res = call('cons', maybecar(expr.conv(state, args[i])), res)
             end
-            return res
         end
+        return call('begin', call('set!', last.symbol('return'), res), call('set!', last.symbol('break'), last.literal(true)))
     elseif ast.type == 'call' then
         local fty = ast[1].datatype
         if fty.type == 'function' then
@@ -388,17 +451,17 @@ function expr.conv(state, ast)
         if ast[1].datatype.type == 'number' and ast[2].datatype.type == 'number' then
             local value
             if ast.type == '+' then
-                value = call('+', lhs, rhs)
+                value = call('fl+', lhs, rhs)
             elseif ast.type == '-' then
-                value = call('-', lhs, rhs)
+                value = call('fl-', lhs, rhs)
             elseif ast.type == '*' then
-                value = call('*', lhs, rhs)
+                value = call('fl*', lhs, rhs)
             elseif ast.type == '/' then
-                value = call('/', lhs, rhs)
+                value = call('fl/', lhs, rhs)
             elseif ast.type == '%' then
                 value = call('modulo', lhs, rhs)
             elseif ast.type == '==' then
-                value = call('=', lhs, rhs)
+                value = call('fl=', lhs, rhs)
             elseif ast.type == '~=' then
                 value = call('~=', lhs, rhs)
             elseif ast.type == '<' then
