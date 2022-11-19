@@ -19,6 +19,6 @@ function table.array(tab)
     return res
 end
 
-local t = table.array {1, 2, 3}
+local t = table.array {10, 20, 30}
 
-print(#{0, table.unpack(t)})
+print(table.unpack(t))

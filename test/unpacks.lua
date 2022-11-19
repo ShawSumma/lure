@@ -34,4 +34,8 @@ local function apply(f, ...)
     return f(unpacks(...))
 end
 
-print(unpacks({1, 2, 3}, {6, 7, 8}))
+local i = 0
+while i < 100000 do
+    i = i + #{unpacks({1, 2, 3}, {4, 5, 6}, {7, 8, 9})}
+end
+print(i)
