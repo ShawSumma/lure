@@ -1,6 +1,7 @@
 #lang racket/base
 
 (require racket/file)
+(require racket/list)
 
 (define lua.meta (gensym))
 (define lua.nometa (gensym))
@@ -92,7 +93,7 @@
     (binary-length tab 0))
 
 (define (lua.flat . args)
-    (apply append args))
+    (flatten args))
 
 (define (lua.call fun . args)
     (apply fun (apply lua.flat args)))
@@ -136,10 +137,11 @@
             (table->list table (+ 1 from)))))
 
 (define (list->table lis (index 1) (table (make-hash)))
-    (hash-set! table index lis)
     (if (null? lis)
         table
-        (list->table (cdr lis) (+ 1 index) table)))
+        (begin
+            (hash-set! table index (car lis))
+            (list->table (cdr lis) (+ 1 index) table))))
 
 (define (lua.tostring obj)
     (cond

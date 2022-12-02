@@ -543,6 +543,91 @@ ops['>='] = 'lua.>='
 ops['=='] = 'lua.=='
 ops['~='] = 'lua.~='
 
+local function exprformat(expr, indent)
+    if indent == nil then
+        indent = 0
+    end
+    if type(expr) == 'string' then
+        return expr
+    end
+    local tab = {}
+    tab[#tab+1] = '('
+    local first = true
+    for i=1, #expr do
+        if expr[i] ~= false then
+            if first then
+                first = false
+            else
+                tab[#tab+1] = '\n'
+                for i=1, indent do
+                    tab[#tab+1] = ' '
+                end
+            end
+            tab[#tab+1] = exprformat(expr[i], indent + 4)
+        end
+    end
+    tab[#tab+1] = ')'
+    return table.concat(tab)
+end
+
+local function exprparse(str)
+    local stack = {{'begin'}}
+    local isstr = false
+    local backslash = false
+    for c=1, string.len(str) do
+        local chr = string.sub(str, c, c)
+        local top = #stack
+        if isstr then
+            local top = #stack
+            local frame = stack[top]
+            frame[#frame] = frame[#frame] .. chr
+            if backslash then
+                backslash = false
+            else
+                if chr == '"' then
+                    isstr = false
+                    backslash = false
+                else
+                    backslash = chr == '\\'
+                end
+            end
+        else
+            if chr == '(' then
+                stack[top+1] = {}
+            elseif chr == ')' then
+                local into = stack[top-1]
+                into[#into+1] = stack[top]
+                stack[top] = nil
+            elseif chr == ' ' then
+                local top = #stack
+                local frame = stack[top]
+                local last = frame[#frame]
+                if type(last) == 'string' and string.len(last) ~= 0 then
+                    frame[#frame+1] = false
+                end
+            else
+                local top = #stack
+                local frame = stack[top]
+                local last = frame[#frame]
+                if type(last) == 'string' then
+                    frame[#frame] = last .. chr
+                else
+                    frame[#frame+1] = chr
+                end
+                if chr == '"' then
+                    isstr = true
+                end
+            end
+        end
+    end
+    return stack[1]
+end
+
+local function parseopt(str)
+    local ast = exprparse(str)
+    return exprformat(ast)
+end
+
 local function unpostfix(ast)
     if ast.type ~= 'postfix' then
         return ast
@@ -565,6 +650,8 @@ local function syntaxstr(ast, vars)
             local chr = string.sub(ast, i, i)
             if chr == '"' then
                 chars[i] = '\\"'
+            elseif chr == '\\' then
+                chars[i] = '\\\\'
             else
                 chars[i] = chr
             end            
@@ -683,7 +770,7 @@ local function syntaxstr(ast, vars)
         tab[#tab + 1] = '(void ((lambda () (let/cc return'
         for i=1, #ast do
             tab[#tab + 1] = ' '
-            tab[#tab + 1] = syntaxstr(ast[i], vars)
+            tab[#tab + 1] = parseopt(syntaxstr(ast[i], vars))
         end
         tab[#tab + 1] = ' (return (list))))))'
         return table.concat(tab)
