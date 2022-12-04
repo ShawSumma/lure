@@ -16,13 +16,11 @@
     (if (lua.nil? value)
         (let ((val (meta-get tab "__index")))
             (if (procedure? val)
-                (lua.car (lua.call val (list tab key)))
+                (lua.car (val tab key))
                 lua.nil))
         value))
 
 (define (lua.setindex! tab key value)
-    (cond
-        ((string? key) (string->symbol key)))
     (hash-set! tab key value))
 
 (define (lua.toboolean val)
@@ -92,12 +90,6 @@
 (define (lua.length tab)
     (binary-length tab 0))
 
-(define (lua.flat . args)
-    (flatten args))
-
-(define (lua.call fun . args)
-    (apply fun (apply lua.flat args)))
-
 (define (lua.list . args)
     args)
 
@@ -115,7 +107,7 @@
 
 (define (lua.method tab name args)
     (define func (lua.index tab name))
-    (lua.call func (list tab) args))
+    (apply func tab args))
 
 (define (lua.cdr lis)
     (if (or (not (list? lis)) (null? lis))
