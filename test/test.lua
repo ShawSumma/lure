@@ -1,3 +1,5 @@
 #lang lua
 
-print(1 + "2" .. 3 * "4")
+local x = {1}
+x[2] = 2
+print(x)

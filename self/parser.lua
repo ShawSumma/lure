@@ -546,31 +546,27 @@ ops['>='] = 'lua.>='
 ops['=='] = 'lua.=='
 ops['~='] = 'lua.~='
 
-local function exprformat(expr, indent)
-    if indent == nil then
-        indent = 0
-    end
+local function exprformat(expr, indent, tab)
     if type(expr) == 'string' then
-        return expr
-    end
-    local tab = {}
-    tab[#tab+1] = '('
-    local first = true
-    for i=1, #expr do
-        if expr[i] ~= false then
-            if first then
-                first = false
-            else
-                tab[#tab+1] = '\n'
-                for i=1, indent do
-                    tab[#tab+1] = ' '
+        tab[#tab+1] = expr
+    else
+        tab[#tab+1] = '('
+        local first = true
+        for i=1, #expr do
+            if expr[i] ~= false then
+                if first then
+                    first = false
+                else
+                    tab[#tab+1] = '\n'
+                    for i=1, indent do
+                        tab[#tab+1] = ' '
+                    end
                 end
+                exprformat(expr[i], indent + 4, tab)
             end
-            tab[#tab+1] = exprformat(expr[i], indent + 4)
         end
+        tab[#tab+1] = ')'
     end
-    tab[#tab+1] = ')'
-    return table.concat(tab)
 end
 
 local function exprparse(str)
@@ -654,13 +650,10 @@ local function expropt(expr)
         if args[2] == 'list' and #args >= 2 then
             local ret = args[#args]
             local i = #args-1
-            print('begin:', i, 3 <= 2)
             while 3 <= i do
-                print('iter:', i)
                 ret = {'cons', args[i], ret}
                 i = i - 1
             end
-            print('end', i)
             return ret
         end
     end
@@ -670,7 +663,9 @@ end
 local function parseopt(str)
     local ast = exprparse(str)
     ast = expropt(ast)
-    return exprformat(ast)
+    local out = {}
+    exprformat(ast, 0, out)
+    return table.concat(out)
 end
 
 local function unpostfix(ast)
@@ -740,7 +735,7 @@ local function syntaxstr(ast, vars)
         return table.concat(tab)
     elseif ast.type == 'table' then
         local tab = {}
-        tab[#tab + 1] = '(let ((lua.table (make-hash)) (lua.nth 0))'
+        tab[#tab + 1] = '(let ((lua.table (lua.newtable)) (lua.nth 0))'
         for i=1, #ast do
             local field = ast[i]
             if field.type == 'fieldnamed' then

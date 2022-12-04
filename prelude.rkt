@@ -5,11 +5,17 @@
 
 (define lua.meta (gensym))
 (define lua.nometa (gensym))
+(define lua.lencache (gensym))
 
 (define lua.nil (void))
 (define lua.nil? void?)
 
 (define lua.nil1 (list lua.nil))
+
+(define (lua.newtable . args)
+    (define ret (apply make-hash args))
+    (binary-length ret 0)
+    ret)
 
 (define (lua.index tab key)
     (define value (hash-ref tab key lua.nil))
@@ -21,7 +27,13 @@
         value))
 
 (define (lua.setindex! tab key value)
-    (hash-set! tab key value))
+    (hash-set! tab key value)
+    (define last-len (hash-ref tab lua.lencache 0))
+    (cond
+        ((and (number? key) (<= (- 1 key) last-len))
+            (binary-length tab (- key 1)))
+        ((and (number? key) (lua.nil? value) (>= key last-len))
+            (binary-length tab (- key 1)))))
 
 (define (lua.toboolean val)
     (not (or (equal? val #f) (lua.nil? val))))
@@ -84,11 +96,13 @@
 (define (binary-length tab low)
     (define index (+ low 1))
     (if (lua.nil? (hash-ref tab index lua.nil))
-        low
+        (begin
+            (hash-set! tab lua.lencache low)
+            low)
         (binary-length tab index)))
 
 (define (lua.length tab)
-    (binary-length tab 0))
+    (hash-ref tab lua.lencache 0))
 
 (define-syntax lua.or
     (syntax-rules ()
@@ -118,9 +132,11 @@
         (cons val
             (table->list table (+ 1 from)))))
 
-(define (list->table lis (index 1) (table (make-hash)))
+(define (list->table lis (index 1) (table (lua.newtable)))
     (if (null? lis)
-        table
+        (begin
+            (hash-set! table lua.lencache (- index 1))
+            table)
         (begin
             (hash-set! table index (car lis))
             (list->table (cdr lis) (+ 1 index) table))))
@@ -142,7 +158,7 @@
 
 (define arg (vector->list (current-command-line-arguments)))
 
-(define _ENV (make-hash
+(define _ENV (lua.newtable
     (list
         (cons "racket"
             #t)
@@ -189,7 +205,7 @@
                 (newline)
                 lua.nil1))
         (cons "table"
-            (make-hash
+            (lua.newtable
                 (list
                     (cons "unpack"
                         (lambda (tab) (table->list tab)))
@@ -198,7 +214,7 @@
                             (list
                                 (apply string-append (table->list arg))))))))
         (cons "string"
-            (make-hash
+            (lua.newtable
                 (list
                     (cons "byte"
                         (lambda (str)
@@ -215,7 +231,7 @@
                         (lambda (str)
                             (list (string-length str)))))))
         (cons "io"
-            (make-hash
+            (lua.newtable
                 (list
                     (cons "dump"
                         (lambda (filename data . nils)
