@@ -53,8 +53,6 @@ function fun.get(name)
     end
 end
 
-local parser = {}
-
 local parser_pos = 1
 local parser_line = 2
 local parser_col = 3
@@ -65,11 +63,11 @@ local best_pos = 1
 local best_line = 2
 local best_col = 3
 
-function parser.new(src)
+local function parser_new(src)
     return {1, 1, 1, src, {0, 1, 1}}
 end
 
-function parser.advance(state, chr)
+local function parser_advance(state, chr)
     if state[parser_pos] > state[parser_best][best_pos] then
         state[parser_best][best_pos] = state[parser_pos]
         state[parser_best][best_line] = state[parser_line]
@@ -94,16 +92,16 @@ function parser.advance(state, chr)
     end
 end
 
-function parser.any(state, ok, err)
+local function parser_any(state, ok, err)
     if state[parser_pos] <= string.len(state[parser_src]) then
         local chr = string.sub(state[parser_src], state[parser_pos], state[parser_pos])
-        return ok(parser.advance(state, chr), chr)
+        return ok(parser_advance(state, chr), chr)
     else
         return err(state, 'unexpected: end of file')
     end
 end
 
-function parser.eof(state, ok, err)
+local function parser_eof(state, ok, err)
     if state[parser_pos] > string.len(state[parser_src]) then
         return ok(state, nil)
     else
@@ -111,13 +109,13 @@ function parser.eof(state, ok, err)
     end
 end
 
-function parser.accept(value)
+local function parser_accept(value)
     return function(state, ok, err)
         return ok(state, value)
     end
 end
 
-function parser.cond(next, xcond)
+local function parser_cond(next, xcond)
     return function(state, ok, err)
         return next(state,
             function(state, data)
@@ -134,9 +132,9 @@ function parser.cond(next, xcond)
     end
 end
 
-function parser.exact(char)
+local function parser_exact(char)
     return function(state, ok, err)
-        return parser.cond(parser.any, function(data) return char == data end)(state,
+        return parser_cond(parser_any, function(data) return char == data end)(state,
             function(state, data)
                 return ok(state, data)
             end,
@@ -157,16 +155,16 @@ function parser.exact(char)
     end
 end
 
-function parser.notexact(char)
-    return parser.cond(parser.any, function(c) return c ~= char end)
+local function parser_notexact(char)
+    return parser_cond(parser_any, function(c) return c ~= char end)
 end
 
-function parser.range(low, high)
+local function parser_range(low, high)
     local function kcond(data)
         return string.byte(low) <= string.byte(data) and string.byte(data) <= string.byte(high)
     end
     return function(state, ok, err)
-        return parser.cond(parser.any, kcond)(state,
+        return parser_cond(parser_any, kcond)(state,
             function(state, data)
                 return ok(state, data)
             end,
@@ -177,7 +175,7 @@ function parser.range(low, high)
     end
 end
 
-function parser.first(...)
+local function parser_first(...)
     local function more(opts, start)
         local first = opts[start]
         if start >= #opts then
@@ -195,7 +193,7 @@ function parser.first(...)
     return more({...}, 1)
 end
 
-function parser.transform(xnext, func)
+local function parser_transform(xnext, func)
     return function(state, ok, err)
         return xnext(state,
             function(state, data)
@@ -206,7 +204,7 @@ function parser.transform(xnext, func)
     end
 end
 
-function parser.cons(parse1, parse2)
+local function parser_cons(parse1, parse2)
     return function(state, ok, err)
         return parse1(state,
             function(state, data1)
@@ -220,53 +218,53 @@ function parser.cons(parse1, parse2)
     end
 end
 
-function parser.list0(next)
+local function parser_list0(next)
     local rest = nil
     local function more(state, ok, err)
         return rest(state, ok, function(state2, msg)
             return ok(state, {})
         end)
     end
-    rest = parser.cons(next, more)
+    rest = parser_cons(next, more)
     return more
 end
 
-function parser.list1(next)
-    return parser.cons(next, parser.list0(next))
+local function parser_list1(next)
+    return parser_cons(next, parser_list0(next))
 end
 
-function parser.skiponly(skip, read)
-    return parser.transform(parser.cons(skip, read), function(data) return data[2] end)
+local function parser_skiponly(skip, read)
+    return parser_transform(parser_cons(skip, read), function(data) return data[2] end)
 end
 
-function parser.skips(skip, read)
-    return parser.skiponly(parser.list0(skip), read)
+local function parser_skips(skip, read)
+    return parser_skiponly(parser_list0(skip), read)
 end
 
-function parser.string(str)
-    local ret = parser.accept({})
+local function parser_string(str)
+    local ret = parser_accept({})
     local len = string.len(str)
     for i=0, len-1 do
-        ret = parser.cons(parser.exact(string.sub(str, len-i, len-i)), ret)
+        ret = parser_cons(parser_exact(string.sub(str, len-i, len-i)), ret)
     end
-    return parser.transform(ret, fun.joinlist)
+    return parser_transform(ret, fun.joinlist)
 end
 
-function parser.listof(...)
+local function parser_listof(...)
     local tab = {...}
     local function more(head)
         local cur = tab[head]
         if cur == nil then
-            return parser.accept({})
+            return parser_accept({})
         else
-            return parser.cons(cur, more(head + 1))
+            return parser_cons(cur, more(head + 1))
         end
     end
     return more(1)
 end
 
-function parser.select(n, ...)
-    return parser.transform(parser.listof(...), function(data)
+local function parser_select(n, ...)
+    return parser_transform(parser_listof(...), function(data)
         for i=2, n do
             data = data[2]
         end
@@ -274,12 +272,12 @@ function parser.select(n, ...)
     end)
 end
 
-function parser.sep1(lis, sep)
-    return parser.cons(lis, parser.list0(parser.select(2, sep, lis)))
+local function parser_sep1(lis, sep)
+    return parser_cons(lis, parser_list0(parser_select(2, sep, lis)))
 end
 
-function parser.sep(lis, sep)
-    return parser.first(parser.sep1(lis, sep), parser.accept({}))
+local function parser_sep(lis, sep)
+    return parser_first(parser_sep1(lis, sep), parser_accept({}))
 end
 
 local function aststr(ast)
@@ -303,11 +301,11 @@ end
 
 local lua = {}
 
-lua.comment = parser.listof(parser.string('--'), parser.list0(parser.notexact('\n')))
-lua.ws = parser.list0(parser.first(parser.exact(' '), parser.exact('\n'), parser.exact('\t'), parser.exact('\r'), lua.comment))
+lua.comment = parser_listof(parser_string('--'), parser_list0(parser_notexact('\n')))
+lua.ws = parser_list0(parser_first(parser_exact(' '), parser_exact('\n'), parser_exact('\t'), parser_exact('\r'), lua.comment))
 
 function lua.wrap(par)
-    return parser.select(2, lua.ws, par, lua.ws)
+    return parser_select(2, lua.ws, par, lua.ws)
 end
 
 local astmetatable = {__tostring = aststr}
@@ -317,7 +315,7 @@ local function makeast(type, pos, ...)
 end
 
 function lua.ast(ast, ...)
-    local next = lua.wrap(parser.listof(...))
+    local next = lua.wrap(parser_listof(...))
     return function(state1, ok, err)
         return next(state1,
             function(state2, data1)
@@ -352,11 +350,11 @@ function lua.delay(name)
 end
 
 function lua.ignore(par)
-    return parser.transform(par, function(data) return {ignore=true} end)
+    return parser_transform(par, function(data) return {ignore=true} end)
 end
 
 function lua.maybe(par)
-    return parser.first(par, parser.accept({ignore = true}))
+    return parser_first(par, parser_accept({ignore = true}))
 end
 
 local astlist = function(arg) 
@@ -377,21 +375,21 @@ local function iskeyword(id)
 end
 
 function lua.keyword(name)
-    return lua.ignore(lua.wrap(parser.cond(parser.string(name), iskeyword)))
+    return lua.ignore(lua.wrap(parser_cond(parser_string(name), iskeyword)))
 end
 
 function lua.keywordliteral(name)
-    return parser.cond(parser.string(name), iskeyword)
+    return parser_cond(parser_string(name), iskeyword)
 end
 
 function lua.binop(child, names)
-    local ops = parser.string(names[1])
+    local ops = parser_string(names[1])
     for i=2, #names do
-        ops = parser.first(ops, parser.string(names[i]))
+        ops = parser_first(ops, parser_string(names[i]))
     end
     ops = lua.wrap(ops)
-    return parser.transform(
-        lua.wrap(parser.cons(child, parser.list0(parser.cons(ops, child)))),
+    return parser_transform(
+        lua.wrap(parser_cons(child, parser_list0(parser_cons(ops, child)))),
         function(data)
             local lhs = data[1]
             local rhs = fun.unlist(data[2])
@@ -409,68 +407,68 @@ function lua.binop(child, names)
 end
 
 
-lua.lowerletter = parser.range('a', 'z')
-lua.upperletter = parser.range('A', 'Z')
-lua.digit = parser.range('0', '9')
-lua.letter = parser.first(lua.lowerletter, lua.upperletter)
-lua.digits = parser.transform(parser.list1(lua.digit), fun.joinlist)
-lua.name = parser.transform(
-    parser.cons(
-        parser.first(lua.letter, parser.exact('_')),
-        parser.list0(
-            parser.first(lua.digit, lua.letter, parser.exact('_'))
+lua.lowerletter = parser_range('a', 'z')
+lua.upperletter = parser_range('A', 'Z')
+lua.digit = parser_range('0', '9')
+lua.letter = parser_first(lua.lowerletter, lua.upperletter)
+lua.digits = parser_transform(parser_list1(lua.digit), fun.joinlist)
+lua.name = parser_transform(
+    parser_cons(
+        parser_first(lua.letter, parser_exact('_')),
+        parser_list0(
+            parser_first(lua.digit, lua.letter, parser_exact('_'))
         )
     ),
     fun.joinlist
 )
 
 local function stringbody(wrap)
-    return parser.transform(
-        parser.select(
+    return parser_transform(
+        parser_select(
             2,
-            parser.string(wrap),
-            parser.list0(
-                parser.first(
-                    parser.transform(
-                        parser.listof(
-                            parser.exact('\\'),
-                            parser.any
+            parser_string(wrap),
+            parser_list0(
+                parser_first(
+                    parser_transform(
+                        parser_listof(
+                            parser_exact('\\'),
+                            parser_any
                         ),
                         fun.joinlist
                     ),
-                    parser.notexact(wrap)
+                    parser_notexact(wrap)
                 )
             ),
-            parser.exact(wrap)
+            parser_exact(wrap)
         ),
         fun.joinlist
     )
 end
 
-lua.string = lua.ast('string', parser.first(stringbody('"'), stringbody("'")))
+lua.string = lua.ast('string', parser_first(stringbody('"'), stringbody("'")))
 
 lua.expr = lua.delay('expr')
 lua.chunk = lua.delay('chunk')
-lua.varargs = lua.ast('varargs', lua.ignore(parser.string('...')))
-lua.literal = lua.ast('literal', parser.first(lua.varargs, lua.keywordliteral('nil'), lua.keywordliteral('false'), lua.keywordliteral('true')))
+lua.varargs = lua.ast('varargs', lua.ignore(parser_string('...')))
+lua.literal = lua.ast('literal', parser_first(lua.varargs, lua.keywordliteral('nil'), lua.keywordliteral('false'), lua.keywordliteral('true')))
 lua.number = lua.ast('number', lua.digits)
-lua.ident = lua.ast('ident', parser.cond(lua.name, isident))
-lua.params = lua.ast('params', lua.ignore(parser.exact('(')), parser.transform(parser.sep(parser.first(lua.varargs, lua.ident), parser.exact(',')), astlist), lua.ignore(parser.exact(')')))
-lua.fieldnamed = lua.ast('fieldnamed', lua.ident, lua.ignore(parser.exact('=')), lua.expr)
+lua.ident = lua.ast('ident', parser_cond(lua.name, isident))
+lua.params = lua.ast('params', lua.ignore(parser_exact('(')), parser_transform(parser_sep(parser_first(lua.varargs, lua.ident), parser_exact(',')), astlist), lua.ignore(parser_exact(')')))
+lua.fieldnamed = lua.ast('fieldnamed', lua.ident, lua.ignore(parser_exact('=')), lua.expr)
 lua.fieldnth = lua.ast('fieldnth', lua.expr)
-lua.fieldvalue = lua.ast('fieldvalue', lua.ignore(parser.exact('[')), lua.expr, parser.exact(']'), lua.ignore(parser.exact('=')), lua.expr)
-lua.field = parser.first(lua.fieldnamed, lua.fieldnth, lua.fieldvalue)
-lua.table = lua.ast('table', lua.ignore(parser.exact('{')), lua.ws, parser.transform(parser.sep(lua.field, parser.exact(',')), astlist), lua.ignore(parser.exact('}')))
+lua.fieldvalue = lua.ast('fieldvalue', lua.ignore(parser_exact('[')), lua.expr, parser_exact(']'), lua.ignore(parser_exact('=')), lua.expr)
+lua.field = parser_first(lua.fieldnamed, lua.fieldnth, lua.fieldvalue)
+lua.table = lua.ast('table', lua.ignore(parser_exact('{')), lua.ws, parser_transform(parser_sep(lua.field, parser_exact(',')), astlist), lua.ignore(parser_exact('}')))
 lua.lambda = lua.ast('lambda', lua.keyword('function'), lua.params, lua.chunk, lua.keyword('end'))
-lua.parens = parser.select(2, parser.exact('('), lua.expr, parser.exact(')'))
-lua.single = parser.first(lua.string, lua.number, lua.lambda, lua.ident, lua.table, lua.literal, lua.parens)
-lua.args = parser.first(lua.ast('call', lua.string), lua.ast('call', lua.table), lua.ast('call', lua.ignore(parser.exact('(')), parser.transform(parser.sep(lua.expr, lua.wrap(parser.exact(','))), astlist), lua.ignore(parser.exact(')'))))
-lua.index = lua.ast('index', lua.ignore(parser.exact('[')), lua.expr, lua.ignore(parser.exact(']')))
-lua.dotindex = lua.ast('dotindex', lua.ignore(parser.exact('.')), lua.ident)
-lua.methodcall = lua.ast('method', lua.ignore(parser.exact(':')), lua.ident, lua.args)
-lua.postext = parser.first(lua.args, lua.index, lua.dotindex, lua.methodcall)
-lua.post = lua.ast('postfix', lua.single, parser.transform(parser.list0(lua.postext), astlist))
-lua.pre = parser.first(lua.ast('length', lua.ignore(parser.exact('#')), lua.post), lua.ast('not', lua.keyword('not'), lua.post), lua.post)
+lua.parens = parser_select(2, parser_exact('('), lua.expr, parser_exact(')'))
+lua.single = parser_first(lua.string, lua.number, lua.lambda, lua.ident, lua.table, lua.literal, lua.parens)
+lua.args = parser_first(lua.ast('call', lua.string), lua.ast('call', lua.table), lua.ast('call', lua.ignore(parser_exact('(')), parser_transform(parser_sep(lua.expr, lua.wrap(parser_exact(','))), astlist), lua.ignore(parser_exact(')'))))
+lua.index = lua.ast('index', lua.ignore(parser_exact('[')), lua.expr, lua.ignore(parser_exact(']')))
+lua.dotindex = lua.ast('dotindex', lua.ignore(parser_exact('.')), lua.ident)
+lua.methodcall = lua.ast('method', lua.ignore(parser_exact(':')), lua.ident, lua.args)
+lua.postext = parser_first(lua.args, lua.index, lua.dotindex, lua.methodcall)
+lua.post = lua.ast('postfix', lua.single, parser_transform(parser_list0(lua.postext), astlist))
+lua.pre = parser_first(lua.ast('length', lua.ignore(parser_exact('#')), lua.post), lua.ast('not', lua.keyword('not'), lua.post), lua.post)
 
 lua.powexpr = lua.binop(lua.pre, {'^'})
 lua.mulexpr = lua.binop(lua.powexpr, {'*', '/', '%'})
@@ -480,39 +478,39 @@ lua.compare = lua.binop(lua.catexpr, {'<=', '>=', '==', '~=', '<', '>'})
 lua.logic = lua.binop(lua.compare, {'and', 'or'})
 lua.expr = lua.logic
 
-lua.post1 = lua.ast('postfix', lua.single, parser.transform(parser.list1(lua.postext), astlist))
+lua.post1 = lua.ast('postfix', lua.single, parser_transform(parser_list1(lua.postext), astlist))
 
-lua.idents = lua.ast('to', parser.transform(parser.sep1(lua.ident, parser.exact(',')), astlist))
-lua.exprs = lua.ast('from', parser.transform(parser.sep1(lua.expr, parser.exact(',')), astlist))
-lua.posts = lua.ast('to', parser.transform(parser.sep1(lua.post, parser.exact(',')), astlist))
+lua.idents = lua.ast('to', parser_transform(parser_sep1(lua.ident, parser_exact(',')), astlist))
+lua.exprs = lua.ast('from', parser_transform(parser_sep1(lua.expr, parser_exact(',')), astlist))
+lua.posts = lua.ast('to', parser_transform(parser_sep1(lua.post, parser_exact(',')), astlist))
 
 lua.stmtlocalfunction = lua.ast('local',
     lua.keyword('local'), lua.keyword('function'),
     lua.ident, lua.ast('lambda', lua.params, lua.chunk),
     lua.keyword('end')
 )
-lua.assigns = lua.ast('assign', lua.posts, lua.ignore(parser.exact('=')), lua.exprs)
-lua.stmtlocal = lua.ast('local', lua.keyword('local'), lua.idents, lua.maybe(parser.select(2, parser.exact('='), lua.exprs)))
+lua.assigns = lua.ast('assign', lua.posts, lua.ignore(parser_exact('=')), lua.exprs)
+lua.stmtlocal = lua.ast('local', lua.keyword('local'), lua.idents, lua.maybe(parser_select(2, parser_exact('='), lua.exprs)))
 lua.ifelse = lua.ast('else', lua.keyword('else'), lua.chunk)
 lua.ifelseif = lua.ast('case', lua.keyword('elseif'), lua.expr, lua.keyword('then'), lua.chunk)
-lua.ifelseifs = parser.transform(parser.list0(lua.ifelseif), astlist)
+lua.ifelseifs = parser_transform(parser_list0(lua.ifelseif), astlist)
 lua.stmtif = lua.ast('cond', lua.keyword('if'), lua.ast('case', lua.expr, lua.keyword('then'), lua.chunk), lua.ifelseifs, lua.maybe(lua.ifelse), lua.keyword('end'))
 lua.stmtwhile = lua.ast('while', lua.keyword('while'), lua.expr, lua.keyword('do'), lua.chunk, lua.keyword('end'))
 lua.stmtfunction = lua.ast('function', lua.keyword('function'), lua.post1, lua.chunk, lua.keyword('end'))
-lua.stmtfor = lua.ast('for', lua.keyword('for'), lua.ident, lua.ignore(parser.exact('=')), lua.expr, lua.ignore(parser.exact(',')), lua.expr, lua.maybe(parser.select(2, parser.exact(','), lua.expr)), lua.keyword('do'), lua.chunk, lua.keyword('end'))
+lua.stmtfor = lua.ast('for', lua.keyword('for'), lua.ident, lua.ignore(parser_exact('=')), lua.expr, lua.ignore(parser_exact(',')), lua.expr, lua.maybe(parser_select(2, parser_exact(','), lua.expr)), lua.keyword('do'), lua.chunk, lua.keyword('end'))
 lua.stmtforin = lua.ast('forin', lua.keyword('for'), lua.idents, lua.keyword('in'), lua.exprs, lua.keyword('do'), lua.chunk, lua.keyword('end'))
-lua.stmtdo = parser.select(2, lua.keyword('do'), lua.chunk, lua.keyword('end'))
+lua.stmtdo = parser_select(2, lua.keyword('do'), lua.chunk, lua.keyword('end'))
 lua.stmtbreak = lua.ast('break', lua.keyword('break'))
-lua.stmt = parser.first(lua.stmtbreak, lua.stmtif, lua.stmtforin, lua.stmtfor, lua.stmtlocalfunction, lua.stmtlocal, lua.stmtwhile, lua.stmtfunction, lua.assigns, lua.post1, lua.stmtdo)
+lua.stmt = parser_first(lua.stmtbreak, lua.stmtif, lua.stmtforin, lua.stmtfor, lua.stmtlocalfunction, lua.stmtlocal, lua.stmtwhile, lua.stmtfunction, lua.assigns, lua.post1, lua.stmtdo)
 lua.stmtreturn = lua.ast('return', lua.keyword('return'), lua.exprs)
-lua.chunk = lua.ast('begin', parser.transform(parser.list0(lua.stmt), astlist), lua.maybe(lua.stmtreturn))
+lua.chunk = lua.ast('begin', parser_transform(parser_list0(lua.stmt), astlist), lua.maybe(lua.stmtreturn))
 
-lua.langline = parser.listof(parser.exact('#'), parser.list0(parser.notexact('\n')))
-lua.program = lua.ast('program', lua.ignore(lua.maybe(lua.langline)), lua.chunk, lua.ignore(parser.eof))
+lua.langline = parser_listof(parser_exact('#'), parser_list0(parser_notexact('\n')))
+lua.program = lua.ast('program', lua.ignore(lua.maybe(lua.langline)), lua.chunk, lua.ignore(parser_eof))
 
 local function parse(par, str)
     local ret = {}
-    local state = parser.new(str)
+    local state = parser_new(str)
     par(
         state,
         function(state, data)
@@ -750,18 +748,18 @@ local function syntaxstr(ast, vars)
         return table.concat(tab)
     elseif ast.type == 'while' then
         local tab = {}
-        tab[#tab + 1] = '(let ((break #f)) (for (#:break (or break (not '
+        tab[#tab + 1] = '(begin (let ((break #f)) (for (#:break (or break (not '
         tab[#tab + 1] = syntaxstr(ast[1], vars)
         tab[#tab + 1] = ')))'
         tab[#tab + 1] = syntaxstr(ast[2], vars)
-        tab[#tab + 1] = '))'
+        tab[#tab + 1] = ')) (cond (return (set! break #t))))'
         return table.concat(tab)
     elseif ast.type == 'for' then
         local cvar = vars[#vars]
         cvar[#cvar + 1] = ast[1][1]
         cvar[ast[1][1]] = false
         local tab = {}
-        tab[#tab + 1] = '(let ((break #f)) (for (#:break break (lua.iter (in-range'
+        tab[#tab + 1] = '(begin (let ((break #f)) (for (#:break break (lua.iter (in-range'
         for i=2, #ast-1 do
             if i == 3 then
                 tab[#tab + 1] = '(+ 1 (lua.car '
@@ -777,7 +775,7 @@ local function syntaxstr(ast, vars)
         tab[#tab + 1] = mangle(ast[1][1])
         tab[#tab + 1] = ' lua.iter)'
         tab[#tab + 1] = syntaxstr(ast[#ast], vars)
-        tab[#tab + 1] = ') (void))'
+        tab[#tab + 1] = ') (void)) (cond (return (set! break #t))))'
         return table.concat(tab)
     elseif ast.type == 'ident' then
         for i=1, #vars do
@@ -797,12 +795,13 @@ local function syntaxstr(ast, vars)
         local tab = {}
         tab[#tab + 1] = io.slurp('prelude.rkt')
         tab[#tab + 1] = '\n'
-        tab[#tab + 1] = '(void ((lambda () (let/cc return'
+        tab[#tab + 1] = '(void ((lambda () (define break #f) (define return #f) (define return.value lua.nil1)'
         for i=1, #ast do
-            tab[#tab + 1] = ' '
+            tab[#tab + 1] = '(cond ((not break)'
             tab[#tab + 1] = parseopt(syntaxstr(ast[i], vars))
+            tab[#tab + 1] = '))'
         end
-        tab[#tab + 1] = ' (return (list))))))'
+        tab[#tab + 1] = ' return.value)))'
         return table.concat(tab)
     elseif ast.type == 'begin' then
         if #ast == 0 then
@@ -812,8 +811,9 @@ local function syntaxstr(ast, vars)
         vars[#vars + 1] = ls
         local tab = {}
         for i=1, #ast do
-            tab[#tab + 1] = ' '
+            tab[#tab + 1] = '(cond ((not break)'
             tab[#tab + 1] = syntaxstr(ast[i], vars)
+            tab[#tab + 1] = '))'
         end
         vars[#vars] = nil
         local done = {}
@@ -1018,15 +1018,15 @@ local function syntaxstr(ast, vars)
             end
             tab[#tab + 1] = ')'
         end
-        tab[#tab + 1] = ' (let/cc return'
+        tab[#tab + 1] = ' (define break #f) (define return #f) (define return.value lua.nil1)'
         vars[#vars + 1] = incs
         tab[#tab + 1] = syntaxstr(ast[2], vars)
         vars[#vars] = nil
-        tab[#tab + 1] = '(return (lua.list)))))'
+        tab[#tab + 1] = 'return.value))'
         return table.concat(tab)
     elseif ast.type == 'return' then
         local tab = {}
-        tab[#tab + 1] = '(return (apply list '
+        tab[#tab + 1] = '(set! break #t) (set! return #t) (set! return.value (apply list '
         for i=1, #ast[1] do
             if i == #ast[1] then
                 tab[#tab + 1] = ' '
