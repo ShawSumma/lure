@@ -16,7 +16,7 @@
     (if (lua.nil? value)
         (let ((val (meta-get tab "__index")))
             (if (procedure? val)
-                (lua.car (val tab key))
+                (car (val tab key))
                 lua.nil))
         value))
 
@@ -46,7 +46,7 @@
             (let ((got (meta-get lhs name)))
                 (if (lua.nil? got)
                     (op lhs rhs)
-                    (lua.car (got lhs rhs))))
+                    (car (got lhs rhs))))
             (op lhs rhs))))
 
 (define (number-op fun)
@@ -76,8 +76,8 @@
 (define (lua.== lhs rhs)
     (equal? lhs rhs))
 
-(define (lua.> lhs rhs) (lua.< rhs lhs))
-(define (lua.>= lhs rhs) (lua.<= rhs lhs))
+(define (lua.> lhs rhs) (not (lua.<= lhs rhs)))
+(define (lua.>= lhs rhs) (not (lua.< lhs rhs)))
 (define (lua.~= lhs rhs)
     (not (lua.== lhs rhs)))
 
@@ -89,9 +89,6 @@
 
 (define (lua.length tab)
     (binary-length tab 0))
-
-(define (lua.list . args)
-    args)
 
 (define-syntax lua.or
     (syntax-rules ()
@@ -113,13 +110,6 @@
     (if (or (not (list? lis)) (null? lis))
         (list)
         (cdr lis)))
-
-(define (lua.car val)
-    (if (list? val)
-        (if (null? val)
-            lua.nil
-            (car val))
-        val))
 
 (define (table->list table (from 1))
     (define val (lua.index table from))
@@ -147,7 +137,7 @@
             (let ((fun (meta-get obj "__tostring")))
                 (if (lua.nil? fun)
                     "<table>"
-                    (lua.car (fun obj)))))
+                    (car (fun obj)))))
         (#t "<userdata>")))
 
 (define arg (vector->list (current-command-line-arguments)))
@@ -167,16 +157,16 @@
                 (cond
                     ((not (lua.toboolean thing))
                         (error (lua.tostring err))))
-                (lua.list thing)))
+                (list thing)))
         (cons "tonumber"
             (lambda ((arg lua.nil))
-                (lua.list (lua.tonumber arg))))
+                (list (lua.tonumber arg))))
         (cons "tostring"
             (lambda (arg)
-                (lua.list (lua.tostring arg))))
+                (list (lua.tostring arg))))
         (cons "type"
             (lambda (arg)
-                (lua.list
+                (list
                     (cond
                         ((lua.nil? arg) "nil")
                         ((boolean? arg) "boolean")
