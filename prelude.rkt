@@ -1,7 +1,6 @@
 #lang racket/base
 
 (require racket/file)
-(require racket/list)
 
 (define lua.meta (gensym))
 (define lua.nometa (gensym))
@@ -62,8 +61,8 @@
             (op lhs rhs))))
 
 (define (number-op fun)
-    (lambda args
-        (apply fun (map lua.tonumber args))))
+    (lambda (lhs rhs)
+        (fun (lua.tonumber lhs) (lua.tonumber rhs))))
 
 (define lua.+ (meta-op (number-op +) "__add"))
 (define lua.- (meta-op (number-op -) "__sub"))
@@ -119,11 +118,6 @@
 (define (lua.method tab name args)
     (define func (lua.index tab name))
     (apply func tab args))
-
-(define (lua.cdr lis)
-    (if (or (not (list? lis)) (null? lis))
-        (list)
-        (cdr lis)))
 
 (define (table->list table (from 1))
     (define val (lua.index table from))
