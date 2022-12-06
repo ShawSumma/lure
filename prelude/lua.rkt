@@ -78,14 +78,9 @@
                 (got lhs rhs)))
         (string-append (lua.tostring lhs) (lua.tostring rhs))))
 
-(define (lua.< lhs rhs)
-    (< lhs rhs))
-
-(define (lua.<= lhs rhs)
-    (<= lhs rhs))
-
-(define (lua.== lhs rhs)
-    (equal? lhs rhs))
+(define lua.< <)
+(define lua.<= <=)
+(define lua.== equal?)
 
 (define (lua.> lhs rhs) (not (lua.<= lhs rhs)))
 (define (lua.>= lhs rhs) (not (lua.< lhs rhs)))
@@ -154,8 +149,6 @@
 
 (define _ENV (lua.newtable
     (list
-        (cons "racket"
-            #t)
         (cons "setmetatable"
             (lambda (tab meta)
                 (hash-set! tab lua.meta meta)

@@ -1,5 +1,7 @@
 #lang lua
 
+local unpack = unpack or table.unpack
+
 if io.slurp == nil then
     io.slurp = function(filename)
         local f = io.open(filename)
@@ -136,25 +138,35 @@ local function parser_exact(char)
 end
 
 local function parser_notexact(char)
-    return parser_cond(parser_any, function(c) return c ~= char end)
+    return function(state, ok, err)
+        if state[parser_pos] <= string_len(state[parser_src]) then
+            local chr = string_sub(state[parser_src], state[parser_pos], state[parser_pos])
+            if chr ~= char then
+                return ok(parser_advance(state, chr), chr)
+            else
+                return err(state, 'cannot match')
+            end
+        else
+            return err(state, 'unexpected: end of file')
+        end
+    end
 end
 
 local function parser_range(low, high)
     local low_byte = string_byte(low)
     local high_byte = string_byte(high)
-    local function kcond(data)
-        data = string_byte(data) 
-        return low_byte <= data and data <= high_byte
-    end
     return function(state, ok, err)
-        return parser_cond(parser_any, kcond)(state,
-            function(state, data)
-                return ok(state, data)
-            end,
-            function(state, msg)
-                return err(state, 'cannot match char, not in range `' .. low .. '` .. `' .. high .. '`')
+        if state[parser_pos] <= string_len(state[parser_src]) then
+            local chr = string_sub(state[parser_src], state[parser_pos], state[parser_pos])
+            local byte = string_byte(chr)
+            if low_byte <= byte and byte <= high_byte then
+                return ok(parser_advance(state, chr), chr)
+            else
+                return err(state, 'cannot match range')
             end
-        )
+        else
+            return err(state, 'unexpected: end of file')
+        end
     end
 end
 
@@ -291,10 +303,8 @@ function lua.wrap(par)
     return parser_select(2, lua.ws, par, lua.ws)
 end
 
-local astmetatable = {__tostring = aststr}
 local function makeast(type, pos, ...)
-    return setmetatable({type = type, pos = pos, ...}, astmetatable)
-    -- return {type = type, pos = pos, ...}
+    return {type = type, pos = pos, ...}
 end
 
 function lua.ast(ast, ...)
@@ -389,12 +399,19 @@ function lua.binop(child, names)
     )
 end
 
-
 lua.lowerletter = parser_range('a', 'z')
 lua.upperletter = parser_range('A', 'Z')
 lua.digit = parser_range('0', '9')
 lua.letter = parser_first(lua.lowerletter, lua.upperletter)
-lua.digits = parser_transform(parser_list1(lua.digit), fun_joinlist)
+lua.digits = parser_cond(parser_transform(parser_list1(parser_first(lua.digit, parser_exact('.'))), fun_joinlist), function(s)
+    local dots = 0
+    for i=1, string_len(s) do
+        if string_sub(s, i, i) == '.' then
+            dots = dots + 1
+        end
+    end
+    return dots <= 1
+end)
 lua.name = parser_transform(
     parser_cons(
         parser_first(lua.letter, parser_exact('_')),
@@ -675,13 +692,9 @@ local function syntaxstr(ast, vars)
         local cvar = vars[#vars]
         cvar[#cvar + 1] = ast[1][1]
         cvar[ast[1][1]] = false
-        local inrange = {'in-range'}
+        local inrange = {'in-inclusive-range'}
         for i=2, #ast-1 do
-            if i == 3 then
-                inrange[#inrange + 1] = {'+', '1', {'car', syntaxstr(ast[i], vars)}}
-            else
-                inrange[#inrange + 1] = {'car', syntaxstr(ast[i], vars)}
-            end
+            inrange[#inrange + 1] = {'car', syntaxstr(ast[i], vars)}
         end
         return {'begin', {'let', {{'break', '#f'}}, {'for', {'#:break', 'break', {'lua.iter', inrange}}, {'define', mangle(ast[1][1]), 'lua.iter'}, syntaxstr(ast[#ast], vars)}, {'void'}}, {'cond', {'return', {'set!', 'break', '#t'}}}}
     elseif ast.type == 'ident' then
@@ -700,8 +713,6 @@ local function syntaxstr(ast, vars)
         return {'list', tostring(ast[1])}
     elseif ast.type == 'program' then
         local tab = {}
-        tab[#tab + 1] = io.slurp('prelude.rkt')
-        tab[#tab + 1] = '\n'
         tab[#tab + 1] = '(void ((lambda () (define break #f) (define return #f) (define return.value lua.nil1)'
         for i=1, #ast do
             tab[#tab + 1] = '(cond ((not break)'
@@ -857,28 +868,25 @@ local function syntaxstr(ast, vars)
             return {'let', {{'lua.tmp', tmplist}}, sets}
         end
     elseif ast.type == 'lambda' then
-        local args
+        local args = {'lambda', 'lua.varargs'}
         local incs = {}
-        if #ast[1] == 1 and ast[1][1].type == 'varargs' then
-            args = 'lua.varargs'
-        else
-            args = {}
-            for i=1, #ast[1] do
-                local arg = ast[1][i]
-                if arg.type == 'varargs' then
-                    args[#args + 1] = '.'
-                    args[#args + 1] = 'lua.varargs'
-                else
-                    local name = arg[1]
-                    incs[#incs + 1] = name
-                    args[#args + 1] = {mangle(name), 'lua.nil'}
-                end
+        for i=1, #ast[1] do
+            local arg = ast[1][i]
+            if arg.type ~= 'varargs' then
+                local name = arg[1]
+                incs[#incs + 1] = name
+                args[#args + 1] = {'define', mangle(name), {'if', {'pair?', 'lua.varargs'}, {'begin0', {'car', 'lua.varargs'}, {'set!', 'lua.varargs', {'cdr', 'lua.varargs'}}}, 'lua.nil'}}
             end
         end
         vars[#vars + 1] = incs
         local body = syntaxstr(ast[2], vars)
         vars[#vars] = nil
-        return {'list', {'lambda', args, {'define', 'break', '#f'}, {'define', 'return', '#f'}, {'define', 'return.value', 'lua.nil1'}, body, 'return.value'}}
+        args[#args+1] ={'define', 'break', '#f'}
+        args[#args+1] = {'define', 'return', '#f'}
+        args[#args+1] = {'define', 'return.value', 'lua.nil1'}
+        args[#args+1] = body
+        args[#args+1] = 'return.value'
+        return {'list', args}
     elseif ast.type == 'return' then
         local ents = {'apply', 'list'}
         for i=1, #ast[1] do
@@ -910,19 +918,30 @@ local function syntaxstr(ast, vars)
     end
 end
 
+local infile = nil
+local outfile = nil
+local meta = false
+for i=1, #arg do
+    local cur = arg[i]
+    if infile == nil then
+        infile = cur
+    elseif outfile == nil then
+        outfile = cur
+    else
+        print('error: too many args')
+    end
+end
+
+if outfile == nil then
+    print('error: no output provided')
+end
+
 local src = io.slurp(arg[1])
 local res = parse(lua.program, src)
 if res.ok == true then
     local str = syntaxstr(res.ast, {{"_ENV"}})
-    if arg[2] == nil then
-        if load then
-            print('error: give another argument, (for stdout, use "-")')
-        end
-    elseif arg[2] == '-' then
-        print(str)
-    else
-        io.dump(arg[2], str)
-    end
+    local pre = io.slurp('prelude/lua.rkt')
+    io.dump(outfile, pre .. str)
 else
     print(res.msg)
 end
