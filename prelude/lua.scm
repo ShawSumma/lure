@@ -1,6 +1,6 @@
-(define lua.meta 'lua.meta)
-(define lua.nometa 'lua.nometa)
-(define lua.lencache 'lua.lencache)
+(define lua.meta (gensym))
+(define lua.nometa (gensym))
+(define lua.lencache (gensym))
 
 (define lua.nil '())
 (define lua.nil? null?)
@@ -159,14 +159,6 @@
                     "<table>"
                     (car (fun obj)))))
         (#t "<userdata>")))
-
-(define (lua.range3 low high bump)
-    (if (<= low high)
-        (cons low (lua.range3 (+ low bump) high bump))
-        '()))
-
-(define (lua.range low high . args)
-    (lua.range3 low high (if (pair? args) (car args) 1)))
 
 (define arg (command-line))
 

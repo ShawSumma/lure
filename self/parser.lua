@@ -680,7 +680,7 @@ local function syntaxstr(ast, vars)
             if field.type == 'fieldnamed' then
                 ins[#ins+1] = {'lua.setindex!', 'lua.table', '"' .. field[1][1] .. '"', {'car', syntaxstr(field[2], vars)}}
             elseif field.type == 'fieldnth' then
-                ins[#ins+1] = {'for-each', {{'lua.arg', }}, {'set!', 'lua.nth', {'+', 'lua.nth', '1'}}, {'lua.setindex!', 'lua.table', 'lua.nth', 'lua.arg'}, syntaxstr(field[1], vars)}
+                ins[#ins+1] = {'for-each', {'lambda', {'lua.arg'}, {'set!', 'lua.nth', {'+', 'lua.nth', '1'}}, {'lua.setindex!', 'lua.table', 'lua.nth', 'lua.arg'}}, syntaxstr(field[1], vars)}
             elseif field.type == 'fieldvalue' then
                 ins[#ins+1] = {'lua.setindex!', 'lua.table', {'car', syntaxstr(field[1], vars)}, {'car', syntaxstr(field[2], vars)}}
             end
@@ -711,7 +711,7 @@ local function syntaxstr(ast, vars)
                 {
                     'let', 'lua.loop', {},
                     {'cond', {{'<=', start, 'lua.end'}, {'begin', body, {'set!', start, {'+', start, 'lua.max'}}, {'lua.loop'}}}}
-                },
+                }
             },
             {'cond', {'return', {'set!', 'break', '#t'}}}
         }
