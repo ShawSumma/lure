@@ -503,7 +503,7 @@ lua.stmtdo = parser_select(2, lua.keyword('do'), lua.chunk, lua.keyword('end'))
 lua.stmtbreak = lua.ast('break', lua.keyword('break'))
 lua.stmt = parser_first(lua.stmtbreak, lua.stmtif, lua.stmtforin, lua.stmtfor, lua.stmtlocalfunction, lua.stmtlocal, lua.stmtwhile, lua.stmtfunction, lua.assigns, lua.post1, lua.stmtdo)
 lua.stmtreturn = lua.ast('return', lua.keyword('return'), lua.exprs)
-lua.chunk = lua.ast('begin', parser_transform(parser_list0(lua.stmt), astlist), lua.maybe(lua.stmtreturn))
+lua.chunk = lua.ast('begin', parser_transform(parser_list0(parser_first(lua.stmt, parser_exact(';'))), astlist), lua.maybe(lua.stmtreturn))
 
 lua.langline = parser_listof(parser_exact('#'), parser_list0(parser_notexact('\n')))
 lua.program = lua.ast('program', lua.ignore(lua.maybe(lua.langline)), lua.chunk, lua.ignore(parser_eof))
@@ -680,24 +680,41 @@ local function syntaxstr(ast, vars)
             if field.type == 'fieldnamed' then
                 ins[#ins+1] = {'lua.setindex!', 'lua.table', '"' .. field[1][1] .. '"', {'car', syntaxstr(field[2], vars)}}
             elseif field.type == 'fieldnth' then
-                ins[#ins+1] = {'for-each', {'lambda', {'lua.arg'}, {'set!', 'lua.nth', {'+', 'lua.nth', '1'}}, {'lua.setindex!', 'lua.table', 'lua.nth', 'lua.arg'}}, syntaxstr(field[1], vars)}
+                ins[#ins+1] = {'for-each', {{'lua.arg', }}, {'set!', 'lua.nth', {'+', 'lua.nth', '1'}}, {'lua.setindex!', 'lua.table', 'lua.nth', 'lua.arg'}, syntaxstr(field[1], vars)}
             elseif field.type == 'fieldvalue' then
                 ins[#ins+1] = {'lua.setindex!', 'lua.table', {'car', syntaxstr(field[1], vars)}, {'car', syntaxstr(field[2], vars)}}
             end
         end
         return {'list', {'let', {{'lua.table', {'lua.newtable'}}, {'lua.nth', '0'}}, ins, 'lua.table'}}
     elseif ast.type == 'while' then
-        return {'begin', {'let', {{'break', '#f'}}, {'lua.while', {'lambda', {}, {'and', {'not', 'break'}, {'car', syntaxstr(ast[1], vars)}}}, {'lambda', {}, syntaxstr(ast[2], vars)}}}, {'cond', {'return', {'set!', 'break', '#t'}}}}
+        return {'begin', {'let', {{'break', '#f'}}, {'let', 'lua.loop', {}, {'cond', {{'and', {'not', 'break'}, {'car', syntaxstr(ast[1], vars)}}, {'begin', syntaxstr(ast[2], vars), {'lua.loop'}}}}}}, {'cond', {'return', {'set!', 'break', '#t'}}}}
     elseif ast.type == 'for' then
         local cvar = vars[#vars]
         cvar[#cvar + 1] = ast[1][1]
         cvar[ast[1][1]] = false
-        local inrange = {'lua.range'}
+        local inrange = {}
         for i=2, #ast-1 do
             inrange[#inrange + 1] = {'car', syntaxstr(ast[i], vars)}
         end
-        local body = {'lambda', {'lua.iter'}, {'define', mangle(ast[1][1]), 'lua.iter'}, syntaxstr(ast[#ast], vars), 'break'}
-        return {'begin', {'let', {{'break', '#f'}}, {'lua.for', inrange, body}}, {'cond', {'return', {'set!', 'break', '#t'}}}}
+        local start = mangle(ast[1][1])
+        local body = syntaxstr(ast[#ast], vars)
+        return {
+            'begin',
+            {
+                'let',
+                {
+                    {'break', '#f'},
+                    {start, inrange[1]},
+                    {'lua.end', inrange[2]},
+                    {'lua.max', inrange[3] or "1"}
+                },
+                {
+                    'let', 'lua.loop', {},
+                    {'cond', {{'<=', start, 'lua.end'}, {'begin', body, {'set!', start, {'+', start, 'lua.max'}}, {'lua.loop'}}}}
+                },
+            },
+            {'cond', {'return', {'set!', 'break', '#t'}}}
+        }
     elseif ast.type == 'ident' then
         for i=1, #vars do
             local level = vars[i]
