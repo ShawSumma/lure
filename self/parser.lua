@@ -680,23 +680,24 @@ local function syntaxstr(ast, vars)
             if field.type == 'fieldnamed' then
                 ins[#ins+1] = {'lua.setindex!', 'lua.table', '"' .. field[1][1] .. '"', {'car', syntaxstr(field[2], vars)}}
             elseif field.type == 'fieldnth' then
-                ins[#ins+1] = {'for', {{'lua.arg', syntaxstr(field[1], vars)}}, {'set!', 'lua.nth', {'+', 'lua.nth', '1'}}, {'lua.setindex!', 'lua.table', 'lua.nth', 'lua.arg'}}
+                ins[#ins+1] = {'for-each', {'lambda', {'lua.arg'}, {'set!', 'lua.nth', {'+', 'lua.nth', '1'}}, {'lua.setindex!', 'lua.table', 'lua.nth', 'lua.arg'}}, syntaxstr(field[1], vars)}
             elseif field.type == 'fieldvalue' then
                 ins[#ins+1] = {'lua.setindex!', 'lua.table', {'car', syntaxstr(field[1], vars)}, {'car', syntaxstr(field[2], vars)}}
             end
         end
         return {'list', {'let', {{'lua.table', {'lua.newtable'}}, {'lua.nth', '0'}}, ins, 'lua.table'}}
     elseif ast.type == 'while' then
-        return {'begin', {'let', {{'break', '#f'}}, {'for', {'#:break', {'or', 'break', {'not', {'car', syntaxstr(ast[1], vars)}}}}, syntaxstr(ast[2], vars)}}, {'cond', {'return', {'set!', 'break', '#t'} } } }
+        return {'begin', {'let', {{'break', '#f'}}, {'lua.while', {'lambda', {}, {'and', {'not', 'break'}, {'car', syntaxstr(ast[1], vars)}}}, {'lambda', {}, syntaxstr(ast[2], vars)}}}, {'cond', {'return', {'set!', 'break', '#t'}}}}
     elseif ast.type == 'for' then
         local cvar = vars[#vars]
         cvar[#cvar + 1] = ast[1][1]
         cvar[ast[1][1]] = false
-        local inrange = {'in-inclusive-range'}
+        local inrange = {'lua.range'}
         for i=2, #ast-1 do
             inrange[#inrange + 1] = {'car', syntaxstr(ast[i], vars)}
         end
-        return {'begin', {'let', {{'break', '#f'}}, {'for', {'#:break', 'break', {'lua.iter', inrange}}, {'define', mangle(ast[1][1]), 'lua.iter'}, syntaxstr(ast[#ast], vars)}, {'void'}}, {'cond', {'return', {'set!', 'break', '#t'}}}}
+        local body = {'lambda', {'lua.iter'}, {'define', mangle(ast[1][1]), 'lua.iter'}, syntaxstr(ast[#ast], vars), 'break'}
+        return {'begin', {'let', {{'break', '#f'}}, {'lua.for', inrange, body}}, {'cond', {'return', {'set!', 'break', '#t'}}}}
     elseif ast.type == 'ident' then
         for i=1, #vars do
             local level = vars[i]
@@ -879,7 +880,7 @@ local function syntaxstr(ast, vars)
             if arg.type ~= 'varargs' then
                 local name = arg[1]
                 incs[#incs + 1] = name
-                args[#args + 1] = {'define', mangle(name), {'if', {'pair?', 'lua.varargs'}, {'begin0', {'car', 'lua.varargs'}, {'set!', 'lua.varargs', {'cdr', 'lua.varargs'}}}, 'lua.nil'}}
+                args[#args + 1] = {'define', mangle(name), {'if', {'pair?', 'lua.varargs'}, {'let', {{'lua.res', {'car', 'lua.varargs'}}}, {'set!', 'lua.varargs', {'cdr', 'lua.varargs'}}, 'lua.res'}, 'lua.nil'}}
             end
         end
         vars[#vars + 1] = incs

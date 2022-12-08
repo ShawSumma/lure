@@ -70,7 +70,7 @@
             (binary-length tab (- key 1)))))
 
 (define (lua.toboolean val)
-    (not (or (equal? val #f) (lua.nil? val))))
+    (and val (not (eq? val '()))))
 
 (define (lua.tonumber val)
     (cond
@@ -160,6 +160,28 @@
                     (car (fun obj)))))
         (#t "<userdata>")))
 
+(define (lua.range3 low high bump)
+    (if (<= low high)
+        (cons low (lua.range3 (+ low bump) high bump))
+        '()))
+
+(define (lua.for range body)
+    (cond
+        ((pair? range)
+            (begin
+                (body (car range))
+                (lua.for (cdr range) body)))))
+
+(define (lua.while kcond thendo)
+    (cond
+        ((kcond)
+            (begin
+                (thendo)
+                (lua.while kcond thendo)))))
+
+(define (lua.range low high . args)
+    (lua.range3 low high (if (pair? args) (car args) 1)))
+
 (define arg (command-line))
 
 (define _ENV (lua.newtable
@@ -169,7 +191,7 @@
                 (hashtable-set! tab lua.meta meta)
                 (list tab)))
         (cons "arg"
-            (list->table arg 1 (lua.newtable)))
+            (list->table arg 0 (lua.newtable)))
         (cons "assert"
             (lambda (thing . args)
                 (define err (if (pair? args) (car args) lua.nil))
@@ -201,14 +223,16 @@
         (cons "print"
             (lambda args
                 (define first #f)
-                (for ((arg args))
-                    (if first
-                        (display #\tab)
-                        (set! first #t))
-                    (display
-                        (if (string? arg)
-                            arg
-                            (lua.tostring arg))))
+                (for-each
+                    (lambda (arg)
+                        (if first
+                            (display #\tab)
+                            (set! first #t))
+                        (display
+                            (if (string? arg)
+                                arg
+                                (lua.tostring arg))))
+                    args)
                 (newline)
                 lua.nil1))
         (cons "table"
@@ -243,7 +267,9 @@
                 (list
                     (cons "dump"
                         (lambda (filename data . nils)
-                            (display-to-file data filename #:exists 'replace)
+                            (define out (open-output-file filename 'replace))
+                            (display data out)
+                            (close-port out)
                             lua.nil1))
                     (cons "slurp"
                         (lambda (name . nils)
