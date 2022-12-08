@@ -32,14 +32,6 @@
     (binary-length ret 0)
     ret)
 
-(define (binary-length tab low)
-    (define index (+ low 1))
-    (if (lua.nil? (hashtable-ref tab index lua.nil))
-        (begin
-            (hashtable-set! tab lua.lencache low)
-            low)
-        (binary-length tab index)))
-
 (define (get-meta tab)
     (hashtable-ref tab lua.meta lua.nil))
 
@@ -252,5 +244,6 @@
                     (cons "slurp"
                         (lambda (name . nils)
                             (list (file->string name))))))))))
-(lua.setindex! _ENV "_G" _ENV)
 (define local-_ENV _ENV)
+
+(lua.setindex! _ENV "_G" _ENV)

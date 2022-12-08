@@ -546,8 +546,6 @@ ops['>='] = 'lua.>='
 ops['=='] = 'lua.=='
 ops['~='] = 'lua.~='
 
-local noindent = false
-
 local function exprformat(expr, indent, tab)
     if type(expr) == 'string' then
         tab[#tab+1] = expr
@@ -559,13 +557,9 @@ local function exprformat(expr, indent, tab)
                 if first then
                     first = false
                 else
-                    if noindent then
+                    tab[#tab+1] = '\n'
+                    for i=1, indent do
                         tab[#tab+1] = ' '
-                    else
-                        tab[#tab+1] = '\n'
-                        for i=1, indent do
-                            tab[#tab+1] = ' '
-                        end
                     end
                 end
                 exprformat(expr[i], indent + 1, tab)
@@ -963,7 +957,9 @@ local res = parse(lua.program, src)
 if res.ok == true then
     local str = syntaxstr(res.ast, {{"_ENV"}})
     local pre = io.slurp('prelude/lua.scm')
-    io.dump(outfile, pre .. str)
+    local begintop = '(let () '
+    local endtop = ')'
+    io.dump(outfile, begintop .. pre .. str .. endtop)
 else
     print(res.msg)
 end
