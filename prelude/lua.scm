@@ -43,13 +43,14 @@
 (define (get-meta tab)
     (hashtable-ref tab lua.meta lua.nil))
 
-(define (meta-get tab)
+(define (meta-get tab name)
     (define meta (get-meta tab))
     (if (hashtable? meta)
         (lua.index meta name)
         lua.nil))
 
-(define (lua.index tab key)
+(define (lua.index tab keys)
+    (define key (if (string? keys) (string->symbol keys) keys))
     (define value (hashtable-ref tab key lua.nil))
     (if (lua.nil? value)
         (let ((val (meta-get tab "__index")))
@@ -58,7 +59,8 @@
                 lua.nil))
         value))
 
-(define (lua.setindex! tab key value)
+(define (lua.setindex! tab keys value)
+    (define key (if (string? keys) (string->symbol keys) keys))
     (define last-len (hashtable-ref tab lua.lencache 0))
     (hashtable-set! tab key value)
     (cond
@@ -77,7 +79,7 @@
 
 (define (meta-op op name)
     (lambda (lhs rhs)
-        (if (hash? lhs)
+        (if (hashtable? lhs)
             (let ((got (meta-get lhs name)))
                 (if (lua.nil? got)
                     (op lhs rhs)
@@ -95,7 +97,7 @@
 (define lua./ (meta-op (number-op /) "__div"))
 (define lua.% (meta-op (number-op modulo) "__mod"))
 (define (lua.concat lhs rhs)
-    (if (hash? lhs)
+    (if (hashtable? lhs)
         (let ((got (meta-get lhs "__concat")))
             (if (lua.nil? got)
                 (string-append lhs rhs)
@@ -151,7 +153,7 @@
         ((procedure? obj) "<function>")
         ((string? obj) obj)
         ((number? obj) (number->string obj))
-        ((hash? obj)
+        ((hashtable? obj)
             (let ((fun (meta-get obj "__tostring")))
                 (if (lua.nil? fun)
                     "<table>"
@@ -174,6 +176,7 @@
                 (cond
                     ((not (lua.toboolean thing))
                         (begin
+                            (display "error: ")
                             (display (lua.tostring err))
                             (newline))))
                 (list thing)))
@@ -193,7 +196,7 @@
                         ((procedure? arg) "function")
                         ((string? arg) "string")
                         ((number? arg) "number")
-                        ((hash? arg) "table")
+                        ((hashtable? arg) "table")
                         (#t "userdata")))))
         (cons "print"
             (lambda args

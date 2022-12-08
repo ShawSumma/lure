@@ -655,7 +655,7 @@ local function syntaxstr(ast, vars)
         return {'list', '"' .. table.concat(chars) .. '"'}
     elseif ast.type == 'literal' then
         if ast[1] == 'true' then
-            return {'list', '#t'}
+            return {'list', '#t'} 
         elseif ast[1] == 'false' then
             return {'list', '#f'}
         elseif ast[1] == 'nil' then
@@ -713,13 +713,13 @@ local function syntaxstr(ast, vars)
         return {'list', tostring(ast[1])}
     elseif ast.type == 'program' then
         local tab = {}
-        tab[#tab + 1] = '(void ((lambda () (define break #f) (define return #f) (define return.value lua.nil1)'
+        tab[#tab + 1] = '((lambda () (define break #f) (define return #f) (define return.value lua.nil1)'
         for i=1, #ast do
             tab[#tab + 1] = '(cond ((not break)'
             tab[#tab + 1] = parseopt(syntaxstr(ast[i], vars))
             tab[#tab + 1] = '))'
         end
-        tab[#tab + 1] = ' return.value)))'
+        tab[#tab + 1] = ' return.value (void)))'
         return table.concat(tab)
     elseif ast.type == 'begin' then
         if #ast == 0 then
@@ -742,7 +742,11 @@ local function syntaxstr(ast, vars)
                 lets[#lets + 1] = {mangle(ent), 'lua.nil'}
             end
         end
-        return {'let', lets, tab}
+        if #lets == 0 then
+            return tab
+        else
+            return {'let', lets, tab}
+        end
     elseif ast.type == 'postfix' then
         return syntaxstr(unpostfix(ast), vars)
     elseif ast.type == 'method' then
@@ -940,7 +944,7 @@ local src = io.slurp(arg[1])
 local res = parse(lua.program, src)
 if res.ok == true then
     local str = syntaxstr(res.ast, {{"_ENV"}})
-    local pre = io.slurp('prelude/lua.rkt')
+    local pre = io.slurp('prelude/lua.scm')
     io.dump(outfile, pre .. str)
 else
     print(res.msg)
