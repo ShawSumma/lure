@@ -1,6 +1,5 @@
 #lang lua
 
-local unpack = unpack or table.unpack
 
 if io.slurp == nil then
     io.slurp = function(filename)
@@ -569,19 +568,33 @@ local function exprformat(expr, indent, tab)
     end
 end
 
-local function expropt(expr)
+local function expropt(expr, car)
     if type(expr) == 'string' then
         return expr
     end
     local args = {}
     for i=1, #expr do
         if expr[i] ~= false then
-            args[#args+1] = expropt(expr[i])
+            args[#args+1] = expropt(expr[i], expr[1] == 'lua.car')
         end
     end
-    if args[1] == 'car' then
+    if not car and args[1] == 'lua.list' then
+        if #args == 1 then
+            return {'list'}
+        elseif #args == 2 then
+            return args[2]
+        else
+            return args
+        end
+    elseif args[1] == 'lua.forcelist' then
         if type(args[2]) == 'table' then
-            if args[2][1] == 'list' then
+            if args[2][1] == 'lua.list' then
+                return args[2]
+            end
+        end
+    elseif args[1] == 'lua.car' then
+        if type(args[2]) == 'table' then
+            if args[2][1] == 'lua.list' then
                 if #args[2] == 2 then
                     return args[2][2]
                 else
@@ -594,7 +607,7 @@ local function expropt(expr)
             end
         end
     elseif args[1] == 'apply' then
-        if args[2] == 'list' and #args >= 2 then
+        if args[2] == 'lua.list' and #args >= 2 then
             local ret = args[#args]
             local i = #args-1
             while 3 <= i do
@@ -602,7 +615,7 @@ local function expropt(expr)
                 i = i - 1
             end
             return ret
-        elseif type(args[3]) == 'table' and args[3][1] == 'list' then
+        elseif type(args[3]) == 'table' and args[3][1] == 'lua.list' then
             local ret = {args[2]}
             for i=2, #args[3] do
                 ret[#ret + 1] = args[3][i]
@@ -614,7 +627,7 @@ local function expropt(expr)
 end
 
 local function parseopt(ast)
-    local optast = expropt(ast)
+    local optast = expropt(ast, false)
     local out = {}
     exprformat(optast, 0, out)
     return table.concat(out)
@@ -635,6 +648,8 @@ local function unpostfix(ast)
     return tab
 end
 
+local ntables = 1
+
 local function syntaxstr(ast, vars)
     if type(ast) == 'string' then
         local chars = {}
@@ -646,12 +661,12 @@ local function syntaxstr(ast, vars)
                 chars[i] = chr
             end            
         end
-        return {'list', '"' .. table.concat(chars) .. '"'}
+        return {'lua.list', '"' .. table.concat(chars) .. '"'}
     elseif ast.type == 'literal' then
         if ast[1] == 'true' then
-            return {'list', '#t'} 
+            return {'lua.list', '#t'} 
         elseif ast[1] == 'false' then
-            return {'list', '#f'}
+            return {'lua.list', '#f'}
         elseif ast[1] == 'nil' then
             return 'lua.nil1'
         elseif type(ast[1]) == 'table' and ast[1].type == 'varargs' then
@@ -660,35 +675,38 @@ local function syntaxstr(ast, vars)
             error('bad literal: ' .. tostring(ast[1]))
         end
     elseif ast.type == 'not' then
-        return {'list', {'not', {'lua.toboolean', {'car', syntaxstr(ast[1], vars)}}}}
+        return {'lua.list', {'not', {'lua.toboolean', {'lua.car', syntaxstr(ast[1], vars)}}}}
     elseif ast.type == 'string' then
         return syntaxstr(ast[1], vars)
     elseif ast.type == 'or' then
-        return {'list', {'let', {{'lua.lhs', {'car', syntaxstr(ast[1], vars)}}}, {'if', {'lua.toboolean', 'lua.lhs'}, 'lua.lhs', {'car', syntaxstr(ast[2], vars)}}}}
+        return {'lua.list', {'let', {{'lua.lhs', {'lua.car', syntaxstr(ast[1], vars)}}}, {'if', {'lua.toboolean', 'lua.lhs'}, 'lua.lhs', {'lua.car', syntaxstr(ast[2], vars)}}}}
     elseif ast.type == 'and' then
-        return {'list', {'let', {{'lua.lhs', {'car', syntaxstr(ast[1], vars)}}}, {'if', {'lua.toboolean', 'lua.lhs'}, {'car', syntaxstr(ast[2], vars)}, 'lua.lhs'}}}
+        return {'lua.list', {'let', {{'lua.lhs', {'lua.car', syntaxstr(ast[1], vars)}}}, {'if', {'lua.toboolean', 'lua.lhs'}, {'lua.car', syntaxstr(ast[2], vars)}, 'lua.lhs'}}}
     elseif ast.type == 'table' then
         local ins = {'begin'}
+        local tab = 'lua.table-'..tostring(ntables)
+        ntables = ntables + 1
         for i=1, #ast do
             local field = ast[i]
             if field.type == 'fieldnamed' then
-                ins[#ins+1] = {'lua.setindex!', 'lua.table', '"' .. field[1][1] .. '"', {'car', syntaxstr(field[2], vars)}}
+                ins[#ins+1] = {'lua.setindex!', 'lua.table', '"' .. field[1][1] .. '"', {'lua.car', syntaxstr(field[2], vars)}}
             elseif field.type == 'fieldnth' then
-                ins[#ins+1] = {'for-each', {'lambda', {'lua.arg'}, {'set!', 'lua.nth', {'+', 'lua.nth', '1'}}, {'lua.setindex!', 'lua.table', 'lua.nth', 'lua.arg'}}, syntaxstr(field[1], vars)}
+                local exprval = {'lua.forcelist', syntaxstr(field[1], vars)}
+                ins[#ins+1] = {'for-each', {'lambda', {'lua.arg'}, {'set!', 'lua.nth', {'+', 'lua.nth', '1'}}, {'lua.setindex!', 'lua.table', 'lua.nth', 'lua.arg'}}, exprval}
             elseif field.type == 'fieldvalue' then
-                ins[#ins+1] = {'lua.setindex!', 'lua.table', {'car', syntaxstr(field[1], vars)}, {'car', syntaxstr(field[2], vars)}}
+                ins[#ins+1] = {'lua.setindex!', 'lua.table', {'lua.car', syntaxstr(field[1], vars)}, {'lua.car', syntaxstr(field[2], vars)}}
             end
         end
-        return {'list', {'let', {{'lua.table', {'lua.newtable'}}, {'lua.nth', '0'}}, ins, 'lua.table'}}
+        return {'lua.list', {'let', {{'lua.table', {'lua.newtable'}}, {'lua.nth', '0'}}, ins, 'lua.table'}}
     elseif ast.type == 'while' then
-        return {'begin', {'let', {{'break', '#f'}}, {'let', 'lua.loop', {}, {'cond', {{'and', {'not', 'break'}, {'car', syntaxstr(ast[1], vars)}}, {'begin', syntaxstr(ast[2], vars), {'lua.loop'}}}}}}, {'cond', {'return', {'set!', 'break', '#t'}}}}
+        return {'begin', {'let', {{'break', '#f'}}, {'let', 'lua.loop', {}, {'cond', {{'and', {'not', 'break'}, {'lua.car', syntaxstr(ast[1], vars)}}, {'begin', syntaxstr(ast[2], vars), {'lua.loop'}}}}}}, {'cond', {'return', {'set!', 'break', '#t'}}}}
     elseif ast.type == 'for' then
         local cvar = vars[#vars]
         cvar[#cvar + 1] = ast[1][1]
         cvar[ast[1][1]] = false
         local inrange = {}
         for i=2, #ast-1 do
-            inrange[#inrange + 1] = {'car', syntaxstr(ast[i], vars)}
+            inrange[#inrange + 1] = {'lua.car', syntaxstr(ast[i], vars)}
         end
         local start = mangle(ast[1][1])
         local body = syntaxstr(ast[#ast], vars)
@@ -714,15 +732,15 @@ local function syntaxstr(ast, vars)
             local level = vars[i]
             for j=1, #level do
                 if level[j] == ast[1] then
-                    return {'list', mangle(ast[1])}
+                    return {'lua.list', mangle(ast[1])}
                 end
             end
         end
-        return {'list', {'lua.index', 'local-_ENV', '"' .. ast[1] .. '"'}}
+        return {'lua.list', {'lua.symindex', 'local-_ENV', '\'|' .. ast[1] .. '|'}}
     elseif ast.type == 'break' then
         return {'set!', 'break', '#t'}
     elseif ast.type == 'number' then
-        return {'list', tostring(ast[1])}
+        return {'lua.list', tostring(ast[1])}
     elseif ast.type == 'program' then
         local tab = {}
         tab[#tab + 1] = '((lambda () (define break #f) (define return #f) (define return.value lua.nil1)'
@@ -762,43 +780,46 @@ local function syntaxstr(ast, vars)
     elseif ast.type == 'postfix' then
         return syntaxstr(unpostfix(ast), vars)
     elseif ast.type == 'method' then
-        local method = {'apply', 'list'}
+        local method = {'apply', 'lua.list'}
         local args = ast[3]
         for i=1, #args do
             if i == #args then
-                method[#method + 1] = syntaxstr(args[i], vars)
+                method[#method + 1] = {'lua.forcelist', syntaxstr(args[i], vars)}
             else
-                method[#method + 1] = {'car', syntaxstr(args[i], vars)}
+                method[#method + 1] = {'lua.car', syntaxstr(args[i], vars)}
             end
         end
-        return {'lua.method', {'car', syntaxstr(ast[1], vars)}, syntaxstr(ast[2], vars), method}
+        if #method == 2 then
+            method = {'list'}
+        end
+        return {'lua.method', {'lua.car', syntaxstr(ast[1], vars)}, syntaxstr(ast[2], vars), method}
     elseif ast.type == 'call' then
         if #ast == 1 then
-            return {{'car', syntaxstr(ast[1], vars)}}
+            return {{'lua.car', syntaxstr(ast[1], vars)}}
         else
-            local apply = {'apply', {'car', syntaxstr(ast[1], vars)}}
+            local apply = {'apply', {'lua.car', syntaxstr(ast[1], vars)}}
             for i=2, #ast do
                 if i == #ast then
-                    apply[#apply + 1] = syntaxstr(ast[i], vars)
+                    apply[#apply + 1] = {'lua.forcelist', syntaxstr(ast[i], vars)}
                 else
-                    apply[#apply + 1] = {'car', syntaxstr(ast[i], vars)}
+                    apply[#apply + 1] = {'lua.car', syntaxstr(ast[i], vars)}
                 end
             end
             return apply
         end
     elseif ast.type == 'dotindex' then
-        return {'list', {'lua.index', {'car', syntaxstr(ast[1], vars)}, '"' .. ast[2][1] .. '"'}}
+        return {'lua.list', {'lua.symindex', {'lua.car', syntaxstr(ast[1], vars)}, '\'|' .. ast[2][1] .. '|'}}
     elseif ast.type == 'index' then
-        return {'list', {'lua.index', {'car', syntaxstr(ast[1], vars)}, {'car', syntaxstr(ast[2], vars)}}}
+        return {'lua.list', {'lua.index', {'lua.car', syntaxstr(ast[1], vars)}, {'lua.car', syntaxstr(ast[2], vars)}}}
     elseif ast.type == 'assign' then
         local targets = ast[1]
         local exprs = ast[2]
-        local tmp = {'apply', 'list'}
+        local tmp = {'apply', 'lua.list'}
         for i=1, #exprs do
             if i == #exprs then
                 tmp[#tmp + 1] = syntaxstr(exprs[i], vars)
             else
-                tmp[#tmp + 1] = {'car', syntaxstr(exprs[i], vars)}
+                tmp[#tmp + 1] = {'lua.car', syntaxstr(exprs[i], vars)}
             end
         end
         local ins = {'let', {{'lua.tmp', tmp}}}
@@ -810,18 +831,18 @@ local function syntaxstr(ast, vars)
                     local level = vars[i]
                     for j=1, #level do
                         if level[j] == target[1] then
-                            ins[#ins + 1] = {'set!', mangle(target[1]), {'car', 'lua.tmp'}}
+                            ins[#ins + 1] = {'set!', mangle(target[1]), {'lua.car', 'lua.tmp'}}
                             global = false
                         end
                     end
                 end
                 if global then
-                    ins[#ins + 1] = {'lua.setindex!', 'local-_ENV', '"' .. target[1] .. '"', {'car', 'lua.tmp'}}
+                    ins[#ins + 1] = {'lua.setindex!', 'local-_ENV', '"' .. target[1] .. '"', {'lua.car', 'lua.tmp'}}
                 end
             elseif target.type == 'dotindex' then
-                ins[#ins + 1] = {'lua.setindex!', {'car', syntaxstr(target[1], vars)}, '"' .. target[2][1] .. '"', {'car', 'lua.tmp'}}
+                ins[#ins + 1] = {'lua.setindex!', {'lua.car', syntaxstr(target[1], vars)}, '"' .. target[2][1] .. '"', {'lua.car', 'lua.tmp'}}
             elseif target.type == 'index' then
-                ins[#ins + 1] = {'lua.setindex!', {'car', syntaxstr(target[1], vars)}, {'car', syntaxstr(target[2], vars)}, {'car', 'lua.tmp'}}
+                ins[#ins + 1] = {'lua.setindex!', {'lua.car', syntaxstr(target[1], vars)}, {'lua.car', syntaxstr(target[2], vars)}, {'lua.car', 'lua.tmp'}}
             else
                 error('?assign:' .. target.type)
             end
@@ -856,19 +877,21 @@ local function syntaxstr(ast, vars)
         if idents.type == 'ident' then
             cvar[#cvar + 1] = idents[1]
             cvar[idents[1]] = true
-            return {'set!', mangle(idents[1]), {'car', syntaxstr(exprs, vars)}}
+            return {'set!', mangle(idents[1]), {'lua.car', syntaxstr(exprs, vars)}}
         else
-            local tmplist = {'apply', 'list'}
+            local tmplist = {'apply', 'lua.list'}
             if exprs and #exprs ~= 0 then
                 for i=1, #exprs do
                     local res = syntaxstr(exprs[i], vars)
-                    if i~=#exprs then
-                        res = {'car', res}
+                    if i == #exprs then
+                        res = {'lua.forcelist', res}
+                    else
+                        res = {'lua.car', res}
                     end
                     tmplist[#tmplist+1] = res
                 end
             else
-                tmplist = {'list'}
+                tmplist = {'lua.list'}
             end
             local sets = {'begin'}
             for i=1, #idents do
@@ -891,7 +914,7 @@ local function syntaxstr(ast, vars)
             if arg.type ~= 'varargs' then
                 local name = arg[1]
                 incs[#incs + 1] = name
-                args[#args + 1] = {'define', mangle(name), {'if', {'pair?', 'lua.varargs'}, {'let', {{'lua.res', {'car', 'lua.varargs'}}}, {'set!', 'lua.varargs', {'cdr', 'lua.varargs'}}, 'lua.res'}, 'lua.nil'}}
+                args[#args + 1] = {'define', mangle(name), {'if', {'pair?', 'lua.varargs'}, {'let', {{'lua.res', {'lua.car', 'lua.varargs'}}}, {'set!', 'lua.varargs', {'cdr', 'lua.varargs'}}, 'lua.res'}, 'lua.nil'}}
             end
         end
         vars[#vars + 1] = incs
@@ -899,24 +922,24 @@ local function syntaxstr(ast, vars)
         vars[#vars] = nil
         args[#args+1] ={'define', 'break', '#f'}
         args[#args+1] = {'define', 'return', '#f'}
-        args[#args+1] = {'define', 'return.value', 'lua.nil1'}
+        args[#args+1] = {'define', 'return.value', 'lua.nil0'}
         args[#args+1] = body
         args[#args+1] = 'return.value'
-        return {'list', args}
+        return {'lua.list', args}
     elseif ast.type == 'return' then
-        local ents = {'apply', 'list'}
+        local ents = {'apply', 'lua.list'}
         for i=1, #ast[1] do
             if i == #ast[1] then
-                ents[#ents + 1] = syntaxstr(ast[1][i], vars)
+                ents[#ents + 1] = {'lua.forcelist', syntaxstr(ast[1][i], vars)}
             else
-                ents[#ents + 1] = {'car', syntaxstr(ast[1][i], vars)}
+                ents[#ents + 1] = {'lua.car', syntaxstr(ast[1][i], vars)}
             end
         end
         return {'begin', {'set!', 'break', '#t'}, {'set!', 'return', '#t'}, {'set!', 'return.value', ents}}
     elseif ast.type == 'else' then
         return {'#t', syntaxstr(ast[1], vars)}
     elseif ast.type == 'case' then
-        return {{'lua.toboolean', {'car', syntaxstr(ast[1], vars)}}, syntaxstr(ast[2], vars)}
+        return {{'lua.toboolean', {'lua.car', syntaxstr(ast[1], vars)}}, syntaxstr(ast[2], vars)}
     elseif ast.type == 'cond' then
         local cond = {'cond'}
         for i=1, #ast do
@@ -924,11 +947,11 @@ local function syntaxstr(ast, vars)
         end
         return cond
     elseif ast.type == 'length' then
-        return {'list', {'lua.length', {'car', syntaxstr(ast[1], vars)}}}
+        return {'lua.list', {'lua.length', {'lua.car', syntaxstr(ast[1], vars)}}}
     elseif ast.type == 'varargs' then
         return 'lua.varargs'
     elseif ops[ast.type] ~= nil then
-        return {'list', {ops[ast.type], {'car', syntaxstr(ast[1], vars)}, {'car', syntaxstr(ast[2], vars)}}}
+        return {'lua.list', {ops[ast.type], {'lua.car', syntaxstr(ast[1], vars)}, {'lua.car', syntaxstr(ast[2], vars)}}}
     else
         return '?' .. ast.type
     end
@@ -936,7 +959,6 @@ end
 
 local infile = nil
 local outfile = nil
-local meta = false
 for i=1, #arg do
     local cur = arg[i]
     if infile == nil then
@@ -948,18 +970,22 @@ for i=1, #arg do
     end
 end
 
-if outfile == nil then
-    print('error: no output provided')
-end
-
-local src = io.slurp(arg[1])
+local slurp = io.slurp
+local src = slurp(arg[1])
 local res = parse(lua.program, src)
 if res.ok == true then
     local str = syntaxstr(res.ast, {{"_ENV"}})
-    local pre = io.slurp('prelude/lua.scm')
+    local pre = slurp('prelude/lua.scm')
     local begintop = '(let () '
     local endtop = ')'
-    io.dump(outfile, begintop .. pre .. str .. endtop)
+    local finalstr = begintop .. pre .. str .. endtop
+    if outfile ~= nil then
+        io.dump(outfile, finalstr)
+    elseif eval then
+        eval(finalstr)
+    else
+        print('error: no output provided')
+    end
 else
     print(res.msg)
 end

@@ -2,10 +2,24 @@
 (define lua.nometa (gensym))
 (define lua.lencache (gensym))
 
-(define lua.nil '())
-(define lua.nil? null?)
+(define lua.nil (gensym))
+(define (lua.nil? x) (eq? lua.nil x))
 
+(define lua.nil0 (list))
 (define lua.nil1 (list lua.nil))
+
+(define lua.list list)
+
+(define lua.apply apply)
+
+(define (lua.forcelist x)
+    (if (or (pair? x) (null? x)) x (list x)))
+
+(define (lua.car x)
+    (cond
+        ((pair? x) (car x))
+        ((null? x) lua.nil)
+        (#t x)))
 
 (define (file->string name)
     (define lis '())
@@ -41,15 +55,18 @@
         (lua.index meta name)
         lua.nil))
 
-(define (lua.index tab keys)
-    (define key (if (string? keys) (string->symbol keys) keys))
+(define (lua.symindex tab key)
     (define value (hashtable-ref tab key lua.nil))
     (if (lua.nil? value)
         (let ((val (meta-get tab "__index")))
             (if (procedure? val)
-                (car (val tab key))
+                (lua.car (val tab key))
                 lua.nil))
         value))
+
+(define (lua.index tab keys)
+    (define key (if (string? keys) (string->symbol keys) keys))
+    (lua.symindex tab key))
 
 (define (lua.setindex! tab keys value)
     (define key (if (string? keys) (string->symbol keys) keys))
@@ -62,7 +79,7 @@
             (binary-length tab (- key 1)))))
 
 (define (lua.toboolean val)
-    (and val (not (eq? val '()))))
+    (and val (not (lua.nil? val))))
 
 (define (lua.tonumber val)
     (cond
@@ -140,8 +157,8 @@
 (define (lua.tostring obj)
     (cond
         ((lua.nil? obj) "nil")
-        ((equal? obj #t) "true")
-        ((equal? obj #f) "false")
+        ((eq? obj #t) "true")
+        ((eq? obj #f) "false")
         ((procedure? obj) "<function>")
         ((string? obj) obj)
         ((number? obj) (number->string obj))
@@ -149,7 +166,7 @@
             (let ((fun (meta-get obj "__tostring")))
                 (if (lua.nil? fun)
                     "<table>"
-                    (car (fun obj)))))
+                    (lua.car (fun obj)))))
         (#t "<userdata>")))
 
 (define arg (command-line))
@@ -217,6 +234,9 @@
         (cons "string"
             (lua.newtable
                 (list
+                    (cons "char"
+                        (lambda (num)
+                            (list (list->string (list (integer->char num))))))
                     (cons "byte"
                         (lambda (str)
                             (list (char->integer (car (string->list str))))))
@@ -232,6 +252,11 @@
                     (cons "len"
                         (lambda (str)
                             (list (string-length str)))))))
+        (cons "eval"
+            (lambda (expr)
+                (define in (open-input-string expr))
+                (define ret (eval (read in)))
+                (list ret)))
         (cons "io"
             (lua.newtable
                 (list
